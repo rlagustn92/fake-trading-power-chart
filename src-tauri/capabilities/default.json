@@ -1,0 +1,29 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "메인 창 권한: 시세 조회에 필요한 주소만 연다. 알파카는 Rust 관문(alpaca_get)으로만 접근",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:allow-set-title",
+    "notification:default",
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "https://query1.finance.yahoo.com/*" },
+        { "url": "https://query2.finance.yahoo.com/*" },
+        { "url": "https://fapi.binance.com/*" },
+        { "url": "https://api.hyperliquid.xyz/*" },
+        { "url": "https://cdn.cboe.com/*" },
+        { "url": "https://production.dataviz.cnn.io/*" },
+        { "url": "https://api.nasdaq.com/*" },
+        { "url": "https://nfs.faireconomy.media/*" },
+        { "url": "https://markets.newyorkfed.org/*" },
+        { "url": "https://www.federalreserve.gov/*" },
+        { "url": "https://www.clevelandfed.org/*" }
+      ]
+    }
+  ]
+}

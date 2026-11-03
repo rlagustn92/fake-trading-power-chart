@@ -1,0 +1,40 @@
+[package]
+name = "fake-trading-power-chart"
+version = "0.15.0"
+description = "모의매매 + 리플레이 (POWER CHART AND BACKTEST 복제본, 진짜 주문 없음)"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+# Yahoo는 User-Agent가 없으면 429, CNN은 Referer가 없으면 418을 돌려준다 → unsafe-headers로 지정 허용
+# gzip: 알파카 봉 페이지(10000개, 약 1MB)를 압축해서 받는다
+tauri-plugin-http = { version = "2", features = ["unsafe-headers", "gzip"] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-notification = "2"
+# 백업 파일 고르기 창 (어디에 있든 가져오기). Rust에서만 부르고 화면에는 권한을 열지 않는다
+tauri-plugin-dialog = "2"
+# API 키는 파일이 아니라 Windows 자격 증명 관리자에 보관
+keyring = { version = "3", features = ["windows-native"] }
+# 차트 데이터 저장소 (SPEC §2.4): SQLite 파일 하나, 라이브러리를 EXE에 포함
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# 알파카 호출 간격 조절용 (tauri가 이미 쓰는 것과 같은 tokio)
+tokio = { version = "1", features = ["time", "sync", "macros"] }
+# 알파카 실시간 체결 (시세 전용 스트림 하나만, alpaca_stream.rs)
+tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+# 🆕 새 버전 받기 (update.rs): 받은 EXE가 GitHub가 알려 준 SHA-256과 같은지 확인
+sha2 = "0.10"
+hex = "0.4"
+
+# 실행 파일을 작게 (SPEC §1.1: 15MB 이하)
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

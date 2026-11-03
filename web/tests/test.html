@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FAKE TRADING 시험</title>
+  <style>
+    body { margin: 0; padding: 16px 20px; background: #0b0d10; color: #f2f4f7; font: 16px "Segoe UI", "Malgun Gothic", sans-serif; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    h2 { font-size: 18px; margin: 18px 0 6px; color: #c9ced6; }
+    .sum { font-size: 18px; font-weight: 700; margin: 8px 0 12px; }
+    .row { padding: 4px 0; border-bottom: 1px solid #1a1e24; font-variant-numeric: tabular-nums; }
+    .ok::before { content: "✔ "; color: #3ccf6e; }
+    .bad::before { content: "✘ "; color: #ff5b5b; }
+    .bad { color: #ffb4b4; }
+    .muted { color: #8a919b; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <h1>FAKE TRADING 시험 (지표 · 백테스트 · 모의매매)</h1>
+  <p class="muted">개발 서버(python tools/devserver.py)에서 /tests/test.html 을 열면 돈다. 백테스트 시험은 저장소에 QQQ·TQQQ·SQQQ·KRW=X 일봉이 있어야 한다.</p>
+  <div id="sum" class="sum">도는 중…</div>
+  <div id="out"></div>
+  <script type="module" src="tests.js"></script>
+</body>
+</html>

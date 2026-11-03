@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FAKE TRADING POWER CHART</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="vendor/lightweight-charts.standalone.production.js"></script>
+  <script type="module" src="main.js"></script>
+</head>
+<body>
+  <div id="app">
+    <header id="toolbar"></header>
+    <div id="drawbar" hidden></div>
+    <div id="replaybar" hidden></div>
+    <div id="main">
+      <aside id="sidebar"></aside>
+      <section id="charts">
+        <div id="grid"></div>
+      </section>
+      <section id="backtest" hidden></section>
+      <aside id="trade" hidden></aside>
+    </div>
+    <footer id="status"></footer>
+  </div>
+
+  <div id="picker" class="overlay" hidden></div>
+  <div id="indpanel" class="overlay" hidden></div>
+  <div id="settings" class="overlay" hidden></div>
+  <div id="alerts" class="overlay" hidden></div>
+  <div id="journal" class="overlay" hidden></div>
+  <div id="boot" class="boot">FAKE TRADING POWER CHART</div>
+</body>
+</html>

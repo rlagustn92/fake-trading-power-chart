@@ -1,0 +1,18 @@
+src-tauri/target/
+src-tauri/gen/
+tools/dev-data/
+*.lnk
+# 만든 프로그램·묶음은 저장소에 올리지 않는다 (EXE는 GitHub Releases로, "POWER CHART 이전용.zip"·버전별 EXE도)
+release/
+*.exe
+*.zip
+# 시세 데이터·기록·매매 기록 (공개 저장소에 시세를 다시 나눠 주지 않게, 관심종목·그린 것·거래도 안 보이게)
+*.db*
+*.log
+trades.json
+__pycache__/
+# 매매 기록이 보이는 화면 사진은 PC에만 (사용자 결정 2026-11-03)
+매매일지_화면.jpg
+모의매매_화면.jpg
+모의매매_차트.png
+prototype/screenshot.jpg

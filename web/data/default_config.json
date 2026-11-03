@@ -1,0 +1,118 @@
+{
+  "version": 1,
+  "migrated": { "no_default_ind": true, "no_interval_sync": true, "no_time_sync": true, "fomc_off": true },
+  "font": { "scale": 1.0 },
+  "layout": { "sidebar_visible": true, "sidebar_width": 300, "drawbar_visible": false },
+  "watchlist": [
+    "bn:NVDAUSDT", "bn:TSLAUSDT", "bn:QQQUSDT", "bn:SPYUSDT", "bn:SOXLUSDT", "bn:TQQQUSDT", "bn:AAPLUSDT", "bn:AMDUSDT",
+    "bn:PLTRUSDT", "bn:MSTRUSDT", "bn:COINUSDT", "hl:xyz:XYZ100", "bn:BTCUSDT",
+    "QQQ", "^NDX", "^VIX", "KRW=X"
+  ],
+  "grid": {
+    "current": "기본",
+    "sync": { "interval": false, "time": false, "crosshair": true, "indicators": false, "symbol": false },
+    "layouts": {
+      "기본": { "split": "1", "cells": [{ "symbol": "bn:NVDAUSDT", "timeframe": "5m" }] },
+      "1분·5분 같이": {
+        "split": "2h",
+        "sync": { "interval": false, "time": true, "crosshair": true, "indicators": false, "symbol": true },
+        "cells": [{ "symbol": "bn:NVDAUSDT", "timeframe": "1m" }, { "symbol": "bn:NVDAUSDT", "timeframe": "5m" }]
+      },
+      "아침 체크": {
+        "split": "8",
+        "cells": [
+          { "symbol": "hl:xyz:XYZ100", "timeframe": "1D" }, { "symbol": "QQQ", "timeframe": "1D" },
+          { "symbol": "SOXL", "timeframe": "1D" }, { "symbol": "^VIX", "timeframe": "1D" },
+          { "symbol": "KRW=X", "timeframe": "1D" }, { "symbol": "^TNX", "timeframe": "1D" },
+          { "symbol": "cnn:FEAR_GREED", "timeframe": "1D" }, { "symbol": "^KS11", "timeframe": "1D" }
+        ]
+      },
+      "SOXL 단타": {
+        "split": "4",
+        "sync": { "interval": false, "time": false, "crosshair": true, "indicators": false, "symbol": false },
+        "cells": [
+          { "symbol": "SOXL", "timeframe": "1m" }, { "symbol": "SOXL", "timeframe": "5m" },
+          { "symbol": "AMD", "timeframe": "1m", "indicators": [{ "id": "vwma", "params": { "length": 100 }, "color": "#4cd5a0", "width": 2 }, { "id": "volume", "params": { "ma": 20 } }] },
+          { "symbol": "AMD", "timeframe": "5m", "indicators": [{ "id": "vwma", "params": { "length": 100 }, "color": "#4cd5a0", "width": 2 }, { "id": "volume", "params": { "ma": 20 } }] }
+        ]
+      }
+    }
+  },
+  "chart": {
+    "price_basis": "split",
+    "scale_daily": "log",
+    "scale_intraday": "normal",
+    "regular_hours_only": true,
+    "show_split_markers": true,
+    "show_dividend_markers": false,
+    "show_sentiment_events": true,
+    "chart_type": "candle",
+    "session_breaks": true,
+    "magnet": true,
+    "keep_draw_tool": true,
+    "show_fomc": false,
+    "show_earn": true
+  },
+  "indicators": [],
+  "indicator_presets": {
+    "추세 기본 (SMA·볼린저·거래량·RSI·낙폭)": [
+    { "id": "sma", "params": { "length": 20 }, "color": "#f5c542", "width": 1 },
+    { "id": "sma", "params": { "length": 200 }, "color": "#b18cff", "width": 2 },
+    { "id": "bb", "params": { "length": 20, "mult": 2 }, "color": "#5ec8d8", "width": 1 },
+    { "id": "volume", "params": { "ma": 20 } },
+    { "id": "rsi", "params": { "length": 14 } },
+    { "id": "drawdown", "params": {} }
+  ]
+  },
+  "alerts": [],
+  "alert_sound": true,
+  "backtest": {
+    "symbols": ["QQQ", "QLD", "TQQQ"],
+    "start": null,
+    "end": null,
+    "common_period": true,
+    "currency": "USD",
+    "monthly_usd": 100,
+    "monthly_krw": 500000,
+    "buy_day": "first",
+    "buy_day_n": 1,
+    "initial": 0,
+    "dividends": "accumulate",
+    "fractional": true,
+    "compare_lump_sum": false,
+    "saved": []
+  },
+  "data": {
+    "intraday_1m_months": 12,
+    "intraday_5m_from": "2016-01-01",
+    "auto_update": true,
+    "yahoo_poll_sec": 60,
+    "quote_poll_sec": 15,
+    "stock_list": "auto"
+  },
+  "alpaca": { "enabled": true, "poll_sec": 5 },
+  "perp": {
+    "enabled": true,
+    "map": {
+      "QQQ": { "source": "binance", "symbol": "QQQUSDT" },
+      "SPY": { "source": "binance", "symbol": "SPYUSDT" },
+      "SOXL": { "source": "binance", "symbol": "SOXLUSDT" },
+      "TQQQ": { "source": "binance", "symbol": "TQQQUSDT" },
+      "SQQQ": { "source": "binance", "symbol": "SQQQUSDT" },
+      "^NDX": { "source": "hyperliquid", "symbol": "xyz:XYZ100" },
+      "^GSPC": { "source": "hyperliquid", "symbol": "xyz:SP500" },
+      "QLD": { "estimate": "QQQ", "mult": 2 },
+      "SSO": { "estimate": "SPY", "mult": 2 },
+      "UPRO": { "estimate": "SPY", "mult": 3 },
+      "005930.KS": { "source": "binance", "symbol": "SAMSUNGUSDT", "fx": "KRW" },
+      "000660.KS": { "source": "binance", "symbol": "SKHYNIXUSDT", "fx": "KRW" },
+      "069500.KS": { "source": "binance", "symbol": "KODEX200USDT", "fx": "KRW" },
+      "005380.KS": { "source": "binance", "symbol": "HYUNDAIUSDT", "fx": "KRW" },
+      "035420.KS": { "source": "binance", "symbol": "NAVERUSDT", "fx": "KRW" },
+      "066570.KS": { "source": "binance", "symbol": "LGELECTRONICSUSDT", "fx": "KRW" },
+      "042700.KS": { "source": "binance", "symbol": "HANMIUSDT", "fx": "KRW" },
+      "009150.KS": { "source": "binance", "symbol": "SAMSUNGEMUSDT", "fx": "KRW" }
+    },
+    "auto_us": true
+  }
+}

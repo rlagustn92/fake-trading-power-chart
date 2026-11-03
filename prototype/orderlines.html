@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>주문선 시험판</title>
+<!--
+  주문선 끌기 시험판 (기획서 §12 "구현 전 단일 HTML 프로토타입으로 조작감부터 검증").
+  - 원본 앱 그리기 도구(web/drawings/layer.js)와 같은 방식: 선은 차트 가격선, 이름표는 primitive로 캔버스에 그리고,
+    누르기는 차트보다 먼저(capture) 받아서 끄는 동안 차트 이동을 잠근다.
+  - 진짜 주문은 없다. 모든 체결은 이 페이지 안의 계산.
+  - 데이터: sample_bars.js (fetch_sample.py가 Binance 1분봉으로 만든 것)
+-->
+<style>
+  :root {
+    --bg: #0b0d10;
+    --panel: #12151a;
+    --panel2: #14181e;
+    --line: #22272e;
+    --fg: #e8eaed;
+    --dim: #8b929c;
+    --up: #ff4d4f;
+    --down: #3d8bff;
+    --tp: #26c281;
+    --sl: #ff8a3d;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font-family: "Segoe UI", "Malgun Gothic", sans-serif; font-size: 17px; }
+  body { display: flex; flex-direction: column; }
+  button, select, input { font: inherit; color: var(--fg); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; }
+  button { cursor: pointer; }
+  button:hover { border-color: #3a414b; }
+  button:disabled { opacity: 0.4; cursor: default; }
+  #top { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  #top h1 { font-size: 19px; margin: 0 6px 0 0; }
+  #sym { color: var(--dim); }
+  #clock { margin-left: auto; font-variant-numeric: tabular-nums; }
+  #main { flex: 1; display: flex; min-height: 0; }
+  #chart { flex: 1; min-width: 0; position: relative; }
+  #toast { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); background: rgba(20, 24, 30, 0.95); border: 1px solid var(--line); border-radius: 10px; padding: 8px 16px; z-index: 5; display: none; }
+  #side { flex: 0 0 330px; background: var(--panel); border-left: 1px solid var(--line); padding: 12px 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+  .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .label { color: var(--dim); }
+  .num { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .big { font-size: 22px; font-weight: 700; padding: 14px 0; flex: 1; border: none; color: #fff; }
+  #buy { background: var(--up); }
+  #sell { background: var(--down); }
+  #flat { width: 100%; padding: 10px 0; }
+  .card { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+  .card h2 { font-size: 16px; margin: 0 0 2px; color: var(--dim); font-weight: 600; }
+  input[type="number"] { width: 140px; text-align: right; }
+  .up { color: var(--up); }
+  .down { color: var(--down); }
+  .tp { color: var(--tp); }
+  .sl { color: var(--sl); }
+  #trades { list-style: none; margin: 0; padding: 0; font-size: 15px; display: flex; flex-direction: column; gap: 4px; }
+  .hint { font-size: 14px; color: var(--dim); line-height: 1.5; }
+  kbd { font-family: Consolas, monospace; font-size: 13px; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+</style>
+</head>
+<body>
+  <div id="top">
+    <h1>주문선 시험판</h1>
+    <span id="sym"></span>
+    <button id="play" title="Space">▶ 재생</button>
+    <button id="step" title="→">한 봉 ▶</button>
+    <select id="speed" title="1초에 몇 봉">
+      <option value="1">1배</option>
+      <option value="2">2배</option>
+      <option value="5">5배</option>
+      <option value="10">10배</option>
+    </select>
+    <button id="restart">🎲 다른 시점에서 다시</button>
+    <span id="clock" class="num"></span>
+  </div>
+  <div id="main">
+    <div id="chart"><div id="toast"></div></div>
+    <div id="side">
+      <div class="card">
+        <h2>계좌 (연습용 가상 돈)</h2>
+        <div class="row"><span class="label">잔고</span><span id="cash" class="num"></span></div>
+        <div class="row"><span class="label">평가 손익</span><span id="upnl" class="num"></span></div>
+        <div class="row"><span class="label">합계</span><span id="equity" class="num"></span></div>
+      </div>
+      <div class="row"><span class="label">주문 금액 ($)</span><input id="amount" type="number" min="100" step="100" value="5000" /></div>
+      <div class="row">
+        <button id="buy" class="big" title="B">매수 (롱)</button>
+        <button id="sell" class="big" title="S">매도 (숏)</button>
+      </div>
+      <button id="flat" title="X">포지션 종료 (지금 가격)</button>
+      <div class="card" id="poscard">
+        <h2>포지션</h2>
+        <div class="row"><span class="label">방향 · 수량</span><span id="pside" class="num">없음</span></div>
+        <div class="row"><span class="label">평단</span><span id="pentry" class="num">—</span></div>
+        <div class="row"><span class="label tp">익절 가격</span><input id="tpIn" type="number" step="0.01" disabled /></div>
+        <div class="row"><span class="label sl">손절 가격</span><input id="slIn" type="number" step="0.01" disabled /></div>
+        <div class="row"><span class="label">손익비</span><span id="rr" class="num">—</span></div>
+      </div>
+      <div class="hint">
+        매수·매도를 누르면 <b class="tp">익절선</b>과 <b class="sl">손절선</b>이 생깁니다. <b>선이나 이름표를 마우스로 잡고 위아래로 끌어 보세요.</b> 숫자를 직접 고쳐도 됩니다.<br />
+        단축키: <kbd>Space</kbd> 재생·멈춤 · <kbd>→</kbd> 한 봉 · <kbd>B</kbd> 매수 · <kbd>S</kbd> 매도 · <kbd>X</kbd> 종료
+      </div>
+      <div class="card">
+        <h2>거래 기록 <span id="stats"></span></h2>
+        <ul id="trades"></ul>
+      </div>
+      <div class="hint">
+        체결 규칙 (기획서 §12): 한 봉 안에서 익절·손절이 둘 다 닿으면 <b>손절 먼저</b> · 익절은 <b>한 틱 넘게 지나가야</b> 체결 · 시가가 선을 건너뛰면 <b>시가로</b> 체결 · 수수료 시장가 0.09%, 익절(지정가) 0.03% (trade.xyz 기본값을 가정)
+      </div>
+    </div>
+  </div>
+
+<script src="lightweight-charts.standalone.production.js"></script>
+<script src="sample_bars.js"></script>
+<script>
+"use strict";
+const LC = window.LightweightCharts;
+const KST = 9 * 3600; // 라이브러리는 UTC로 그리므로 시각을 9시간 밀어 한국 시간으로 보이게 한다 (시험판용)
+const TICK = 0.01;
+const FEE_TAKER = 0.0009; // trade.xyz 기본 수수료 (가정, 기획 확정 아님)
+const FEE_MAKER = 0.0003;
+const START_CASH = 10000;
+const DEF_TP = 0.005; // 진입하면 처음 놓는 익절 +0.5%, 손절 −0.25% (손익비 2, 1분봉 단타 기준)
+const DEF_SL = 0.0025;
+const UP = "#ff4d4f";
+const DOWN = "#3d8bff";
+const TP_C = "#26c281";
+const SL_C = "#ff8a3d";
+
+const $ = (id) => document.getElementById(id);
+const src = window.SAMPLE;
+const bars = src.bars.map(([t, o, h, l, c]) => ({ time: t + KST, open: o, high: h, low: l, close: c }));
+
+// ── 계산 (화면과 무관, 나중에 web/trade/engine으로 옮길 부분) ──
+const roundTick = (p) => +(Math.round(p / TICK) * TICK).toFixed(2);
+
+/** 이 봉에서 익절·손절이 걸리는지 → {price, why} | null */
+function exitOnBar(p, b) {
+  const long = p.side > 0;
+  // 시가가 이미 선을 건너뛰었으면(갭) 선 가격이 아니라 시가로
+  if (long ? b.open <= p.sl : b.open >= p.sl) return { price: b.open, why: "sl" };
+  if (long ? b.open > p.tp : b.open < p.tp) return { price: b.open, why: "tp" };
+  // 한 봉 안에서 둘 다 닿으면 순서를 모르므로 손절 먼저 (보수적)
+  if (long ? b.low <= p.sl : b.high >= p.sl) return { price: p.sl, why: "sl" };
+  // 지정가 익절은 닿기만 해서는 안 되고 한 틱 넘게 지나가야 체결
+  if (long ? b.high > p.tp : b.low < p.tp) return { price: p.tp, why: "tp" };
+  return null;
+}
+
+const gross = (p, price) => p.side * (price - p.entry) * p.qty;
+const feeOf = (price, qty, rate) => price * qty * rate;
+/** 이 가격에 나가면 손에 쥐는 돈 (들어올 때·나갈 때 수수료 뺀 값) */
+const netAt = (p, price, why) => gross(p, price) - p.fee - feeOf(price, p.qty, why === "tp" ? FEE_MAKER : FEE_TAKER);
+
+// ── 상태 ──
+let idx = 0; // 지금 보이는 마지막 봉
+let pos = null; // {side: 1|-1, qty, entry, fee, tp, sl}
+let cash = START_CASH;
+let trades = [];
+let marks = [];
+let timer = 0;
+
+// ── 차트 ──
+const box = $("chart");
+const chart = LC.createChart(box, {
+  autoSize: true,
+  layout: { background: { color: "#0b0d10" }, textColor: "#c9ced6", fontSize: 14, fontFamily: '"Segoe UI", "Malgun Gothic", sans-serif' },
+  grid: { vertLines: { color: "#161a20" }, horzLines: { color: "#161a20" } },
+  rightPriceScale: { borderColor: "#22272e" },
+  timeScale: { borderColor: "#22272e", timeVisible: true, secondsVisible: false, rightOffset: 45, barSpacing: 7 },
+  crosshair: { mode: 0 },
+});
+const series = chart.addSeries(LC.CandlestickSeries, {
+  upColor: UP, downColor: DOWN, borderUpColor: UP, borderDownColor: DOWN, wickUpColor: UP, wickDownColor: DOWN,
+  priceFormat: { type: "price", precision: 2, minMove: TICK },
+  // 가격선은 자동 눈금에 안 들어가므로 익절·손절이 화면 밖으로 나가지 않게 범위에 넣는다
+  autoscaleInfoProvider: (orig) => {
+    const r = orig();
+    if (!r || !pos) return r;
+    r.priceRange.minValue = Math.min(r.priceRange.minValue, pos.tp, pos.sl);
+    r.priceRange.maxValue = Math.max(r.priceRange.maxValue, pos.tp, pos.sl);
+    return r;
+  },
+});
+const markerApi = LC.createSeriesMarkers(series, []);
+
+const lines = {}; // entry·tp·sl → 가격선
+function setLine(key, price, color, style) {
+  if (price == null) {
+    if (lines[key]) series.removePriceLine(lines[key]);
+    delete lines[key];
+    return;
+  }
+  const o = { price, color, lineWidth: 2, lineStyle: style, axisLabelVisible: true, title: "" };
+  if (lines[key]) lines[key].applyOptions(o);
+  else lines[key] = series.createPriceLine(o);
+}
+
+const usd = (n) => `${n >= 0 ? "+" : "−"}$${Math.abs(n).toFixed(2)}`;
+const pct = (n) => `${n >= 0 ? "+" : "−"}${Math.abs(n).toFixed(2)}%`;
+
+/** 선 옆 이름표 목록 (끌 수 있는 것은 drag: true) */
+function labelList() {
+  if (!pos) return [];
+  const cur = bars[idx].close;
+  const move = (price) => ((pos.side * (price - pos.entry)) / pos.entry) * 100;
+  const rr = Math.abs(pos.tp - pos.entry) / Math.abs(pos.entry - pos.sl);
+  return [
+    { key: "entry", price: pos.entry, color: pos.side > 0 ? UP : DOWN, text: `${pos.side > 0 ? "롱" : "숏"} 평단 ${pos.entry.toFixed(2)}  ${usd(netAt(pos, cur, "manual"))} (${pct(move(cur))})` },
+    { key: "tp", price: pos.tp, color: TP_C, drag: true, text: `익절 ${pos.tp.toFixed(2)}  ${usd(netAt(pos, pos.tp, "tp"))} (${pct(move(pos.tp))})  손익비 ${rr.toFixed(1)}` },
+    { key: "sl", price: pos.sl, color: SL_C, drag: true, text: `손절 ${pos.sl.toFixed(2)}  ${usd(netAt(pos, pos.sl, "sl"))} (${pct(move(pos.sl))})` },
+  ];
+}
+
+/** 이름표를 캔버스에 그리고, 누르기 판정용 상자를 기억해 둔다 */
+class OrderLabels {
+  constructor() {
+    this.boxes = [];
+    this._views = [{ zOrder: () => "top", renderer: () => ({ draw: (t) => this.draw(t) }) }];
+  }
+  attached({ requestUpdate }) {
+    this.req = requestUpdate;
+  }
+  detached() {
+    this.req = null;
+  }
+  updateAllViews() {}
+  paneViews() {
+    return this._views;
+  }
+  update() {
+    this.req?.();
+  }
+  // 커서를 위아래 화살표로 (실제 끌기는 아래 pointer 이벤트가 한다)
+  hitTest(x, y) {
+    const key = hitKey(x, y);
+    return key ? { cursorStyle: "ns-resize", externalId: key, zOrder: "top" } : null;
+  }
+  draw(target) {
+    target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
+      this.boxes = [];
+      ctx.font = '600 15px "Segoe UI", "Malgun Gothic", sans-serif';
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "left";
+      // 마지막 봉 바로 오른쪽에 (자리가 없으면 오른쪽 끝에 붙인다)
+      const lastX = chart.timeScale().logicalToCoordinate(idx) ?? mediaSize.width;
+      // 선끼리 가까우면 이름표가 겹치므로 위에서부터 차례로 32px씩 비켜 놓는다 (선은 제자리)
+      const list = labelList()
+        .map((L) => ({ ...L, ly: series.priceToCoordinate(L.price) }))
+        .filter((L) => L.ly != null)
+        .sort((a, b) => a.ly - b.ly);
+      for (let k = 1; k < list.length; k++) list[k].ly = Math.max(list[k].ly, list[k - 1].ly + 32);
+      for (const L of list) {
+        const y = L.ly;
+        const text = (L.drag ? "⇕ " : "") + L.text;
+        const w = ctx.measureText(text).width + 22;
+        const h = 30;
+        const x = Math.max(4, Math.min(lastX + 14, mediaSize.width - w - 6));
+        ctx.fillStyle = "rgba(18, 21, 26, 0.94)";
+        ctx.strokeStyle = L.color;
+        ctx.lineWidth = L.drag ? 2 : 1;
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(x, y - h / 2, w, h, 7);
+        else ctx.rect(x, y - h / 2, w, h);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = L.color;
+        ctx.fillText(text, x + 9, y + 1);
+        if (L.drag) this.boxes.push({ key: L.key, x, y: y - h / 2, w, h });
+      }
+    });
+  }
+}
+const labels = new OrderLabels();
+series.attachPrimitive(labels);
+
+/** 이 자리에 끌 수 있는 선(또는 이름표)이 있나 → "tp" | "sl" | null */
+function hitKey(x, y) {
+  if (!pos) return null;
+  for (const b of labels.boxes) if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.key;
+  for (const key of ["tp", "sl"]) {
+    const ly = series.priceToCoordinate(pos[key]);
+    if (ly != null && Math.abs(ly - y) <= 7) return key;
+  }
+  return null;
+}
+
+/** 익절·손절 가격 바꾸기. 현재가를 넘어가면 바로 체결되므로 현재가 한 틱 앞에서 멈춘다 */
+function setLevel(key, raw) {
+  if (!pos || !Number.isFinite(raw)) return;
+  const cur = bars[idx].close;
+  const above = (key === "tp") === pos.side > 0; // 롱 익절·숏 손절은 현재가 위
+  const p = roundTick(raw);
+  pos[key] = above ? Math.max(p, roundTick(cur + TICK)) : Math.min(p, roundTick(cur - TICK));
+  refresh();
+}
+
+// ── 끌기 (원본 layer.js와 같은 방식: 차트보다 먼저 받아서 막고, 끄는 동안 차트 이동 잠금) ──
+const local = (e) => {
+  const r = box.getBoundingClientRect();
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
+};
+// 끄는 동안에는 가격 눈금도 멈춘다 (선을 따라 눈금이 늘어나면 마우스 아래 가격이 계속 바뀌어 선이 도망간다).
+// 놓은 뒤에도 바로 다시 맞추면 차트가 휙 바뀌어 어색하므로, 다음 봉이 올 때 맞춘다 (step의 resumeScale)
+let scaleHeld = false;
+const lockChart = (on) => {
+  chart.applyOptions({ handleScroll: !on, handleScale: !on });
+  if (on) {
+    series.priceScale().applyOptions({ autoScale: false });
+    scaleHeld = true;
+  }
+};
+function resumeScale() {
+  if (!scaleHeld) return;
+  scaleHeld = false;
+  series.priceScale().applyOptions({ autoScale: true });
+}
+let drag = null;
+
+box.addEventListener(
+  "pointerdown",
+  (e) => {
+    if (e.button !== 0) return;
+    const p = local(e);
+    if (p.x > chart.timeScale().width()) return; // 가격 눈금 위는 차트에 맡긴다
+    const key = hitKey(p.x, p.y);
+    if (!key) return;
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    drag = { key };
+    box.setPointerCapture(e.pointerId);
+    lockChart(true);
+  },
+  true
+);
+box.addEventListener(
+  "pointermove",
+  (e) => {
+    if (!drag) return;
+    e.stopImmediatePropagation();
+    setLevel(drag.key, series.coordinateToPrice(local(e).y));
+  },
+  true
+);
+const endDrag = (e) => {
+  if (!drag) return;
+  e.stopImmediatePropagation();
+  drag = null;
+  lockChart(false);
+};
+box.addEventListener("pointerup", endDrag, true);
+box.addEventListener("pointercancel", endDrag, true);
+
+// ── 매매 ──
+function mark(text, color, below, shape) {
+  marks.push({ time: bars[idx].time, position: below ? "belowBar" : "aboveBar", color, shape, text });
+  markerApi.setMarkers(marks);
+}
+
+function enter(side) {
+  if (pos) return toast("이미 포지션이 있어요. 먼저 종료하세요");
+  const price = bars[idx].close;
+  const qty = +((+$("amount").value || 0) / price).toFixed(3);
+  if (!(qty > 0)) return toast("주문 금액을 넣어 주세요");
+  pos = {
+    side,
+    qty,
+    entry: price,
+    fee: feeOf(price, qty, FEE_TAKER),
+    tp: roundTick(price * (1 + side * DEF_TP)),
+    sl: roundTick(price * (1 - side * DEF_SL)),
+  };
+  mark(side > 0 ? "롱" : "숏", side > 0 ? UP : DOWN, side > 0, side > 0 ? "arrowUp" : "arrowDown");
+  refresh();
+}
+
+function exit(price, why) {
+  const p = pos;
+  const net = netAt(p, price, why);
+  cash += net;
+  trades.unshift({ side: p.side, entry: p.entry, exit: price, why, net });
+  pos = null;
+  const name = { tp: "익절", sl: "손절", manual: "종료" }[why];
+  mark(name, why === "tp" ? TP_C : why === "sl" ? SL_C : "#c9ced6", p.side < 0, "circle");
+  toast(`${name} ${price.toFixed(2)} · ${usd(net)}`);
+  refresh();
+}
+
+// ── 리플레이 ──
+function step() {
+  if (idx >= bars.length - 1) {
+    pause();
+    return toast("받아 둔 데이터가 끝났어요");
+  }
+  idx++;
+  resumeScale();
+  series.update(bars[idx]);
+  if (pos) {
+    const x = exitOnBar(pos, bars[idx]);
+    if (x) exit(x.price, x.why);
+  }
+  refresh();
+}
+
+function play() {
+  if (timer) return pause();
+  timer = setInterval(step, 1000 / +$("speed").value);
+  $("play").textContent = "⏸ 멈춤";
+}
+function pause() {
+  clearInterval(timer);
+  timer = 0;
+  $("play").textContent = "▶ 재생";
+}
+
+/** 다른 시점에서 처음부터 (앞쪽 300봉은 보여 주고 시작) */
+function restart(at = null) {
+  pause();
+  idx = at ?? 300 + Math.floor(Math.random() * Math.max(1, bars.length - 800));
+  pos = null;
+  cash = START_CASH;
+  trades = [];
+  marks = [];
+  markerApi.setMarkers([]);
+  resumeScale();
+  series.setData(bars.slice(0, idx + 1));
+  chart.timeScale().scrollToRealTime();
+  refresh();
+}
+
+// ── 화면 갱신 ──
+let toastTimer = 0;
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.style.display = "block";
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (t.style.display = "none"), 2500);
+}
+
+const signCls = (n) => (n > 0 ? "up" : n < 0 ? "down" : "");
+
+function refresh() {
+  const b = bars[idx];
+  const cur = b.close;
+  $("clock").textContent = `${new Date(b.time * 1000).toISOString().slice(0, 16).replace("T", " ")} (한국)  현재가 ${cur.toFixed(2)}`;
+  setLine("entry", pos?.entry, pos?.side > 0 ? UP : DOWN, 0);
+  setLine("tp", pos?.tp, TP_C, 2);
+  setLine("sl", pos?.sl, SL_C, 2);
+  labels.update();
+
+  const u = pos ? netAt(pos, cur, "manual") : 0;
+  $("cash").textContent = `$${cash.toFixed(2)}`;
+  $("upnl").textContent = pos ? usd(u) : "—";
+  $("upnl").className = `num ${signCls(u)}`;
+  $("equity").textContent = `$${(cash + u).toFixed(2)}`;
+
+  $("pside").textContent = pos ? `${pos.side > 0 ? "롱" : "숏"} · ${pos.qty}주` : "없음";
+  $("pside").className = `num ${pos ? (pos.side > 0 ? "up" : "down") : ""}`;
+  $("pentry").textContent = pos ? pos.entry.toFixed(2) : "—";
+  $("rr").textContent = pos ? (Math.abs(pos.tp - pos.entry) / Math.abs(pos.entry - pos.sl)).toFixed(2) : "—";
+  for (const [id, key] of [["tpIn", "tp"], ["slIn", "sl"]]) {
+    const el = $(id);
+    el.disabled = !pos;
+    if (document.activeElement !== el) el.value = pos ? pos[key].toFixed(2) : "";
+  }
+  $("buy").disabled = $("sell").disabled = !!pos;
+  $("flat").disabled = !pos;
+
+  const wins = trades.filter((t) => t.net > 0).length;
+  $("stats").textContent = trades.length ? `· ${trades.length}번, 승률 ${Math.round((wins / trades.length) * 100)}%` : "";
+  $("trades").innerHTML = trades
+    .slice(0, 30)
+    .map((t) => `<li><span class="${t.side > 0 ? "up" : "down"}">${t.side > 0 ? "롱" : "숏"}</span> ${t.entry.toFixed(2)} → ${t.exit.toFixed(2)} <span class="${t.why}">${{ tp: "익절", sl: "손절", manual: "종료" }[t.why]}</span> <b class="${signCls(t.net)}">${usd(t.net)}</b></li>`)
+    .join("");
+}
+
+// ── 버튼·단축키 ──
+$("sym").textContent = `${src.symbol.replace(/USDT$/, "")} 1분봉 · Binance 무기한선물 (${src.fetched} 받음, ${bars.length}봉)`;
+$("play").onclick = play;
+$("step").onclick = () => (pause(), step());
+$("speed").onchange = () => timer && (pause(), play());
+$("restart").onclick = () => restart();
+$("buy").onclick = () => enter(1);
+$("sell").onclick = () => enter(-1);
+$("flat").onclick = () => pos && exit(bars[idx].close, "manual");
+$("tpIn").onchange = (e) => setLevel("tp", +e.target.value);
+$("slIn").onchange = (e) => setLevel("sl", +e.target.value);
+
+addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT" || e.ctrlKey || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (k === " ") play();
+  else if (k === "arrowright") (pause(), step());
+  else if (k === "b") enter(1);
+  else if (k === "s") enter(-1);
+  else if (k === "x" && pos) exit(bars[idx].close, "manual");
+  else return;
+  e.preventDefault();
+});
+
+// 콘솔에서 확인용
+window.T = { exitOnBar, setLevel, enter, exit, step, restart, hitKey, get pos() { return pos; }, get idx() { return idx; }, get cash() { return cash; }, bars, series, chart, labels };
+
+restart(Math.min(600, bars.length - 1));
+</script>
+</body>
+</html>
