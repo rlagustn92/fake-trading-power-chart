@@ -80,4 +80,4 @@
 - `tools/dev-data/market.db`는 원본 개발 저장소를 복사한 것 + 이번에 받은 봉. 원본 개발 설정은 `config.from-original.json`으로 비켜 뒀다.
 
 ## 사용자가 새 PC·새 AI에게 붙여 넣을 말
-> 이 폴더의 NEXT_START_HERE.md를 읽고 이어서 해줘. 답은 한국어로 쉽게 해줘.
+> GitHub 저장소 https://github.com/rlagustn92/fake-trading-power-chart 를 받아서 NEXT_START_HERE.md → CLAUDE.md → STATUS.md 순서로 읽고 이어서 유지보수해 줘. 답은 한국어로 쉽게 해줘. 내가 말한 것 말고는 기능을 바꾸지 마.
