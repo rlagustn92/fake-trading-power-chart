@@ -7,7 +7,7 @@
 
 **지금 버전 보는 곳**: 창 제목(`FAKE TRADING POWER CHART 0.15.0`), ⚙ 설정 맨 위
 
-**예전 버전 보관 (사용자 요청 2026-11-01)**: `release\`에 `FAKE TRADING POWER CHART 0.12.1.exe`부터 버전마다 이름 붙여 남긴다 (다운그레이드용). 바탕화면 바로가기는 늘 `FAKE TRADING POWER CHART.exe`(최신). 같은 데이터 폴더를 쓰니 옛 버전을 켜도 기록은 그대로. 0.15.0부터는 GitHub Releases(https://github.com/rlagustn92/fake-trading-power-chart/releases)에도 버전마다 EXE가 남는다
+**예전 버전 보관**: 0.15.0부터는 GitHub Releases(https://github.com/rlagustn92/fake-trading-power-chart/releases)가 버전마다 EXE를 남긴다 → `release\`에 버전 이름 복사본은 더 만들지 않는다 (사용자 결정 2026-11-03). 그 전 것(`FAKE TRADING POWER CHART 0.12.1.exe`·`0.13.0`·`0.14.0`·`0.14.1`, 2026-11-01 사용자 요청으로 만든 다운그레이드용)은 GitHub에 없어서 `release\`에 그대로 둔다. 바탕화면 바로가기는 늘 `FAKE TRADING POWER CHART.exe`(최신). 같은 데이터 폴더를 쓰니 옛 버전을 켜도 기록은 그대로
 
 **새 버전을 낼 때 (AI에게도 같은 순서, 2026-11-03부터 GitHub)**
 1. 번호를 올린다: `src-tauri/tauri.conf.json`의 `"version"`, `src-tauri/Cargo.toml`의 `version`, `src-tauri/Cargo.lock`의 `fake-trading-power-chart` 줄
