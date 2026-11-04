@@ -106,7 +106,7 @@ check("XIRR: 1년 뒤 10% → 10%", xirr([[0, -1000], [365 * day, 1100]]), 0.1, 
   };
   const b5 = Array.from({ length: 36 }, (_, k) => ({ t: k * 300, o: k, h: k, l: k, c: k }));
   const h1 = [11, 23, 35].map((c, k) => ({ t: k * 3600, o: c, h: c, l: c, c }));
-  const only1h = { on_15m: false, on_1h: true, len_1h: 2, on_4h: false, on_1D: false, on_1W: false, kind: "sma", tags: true };
+  const only1h = { on_15m: false, on_1h: true, len_1h: 2, on_4h: false, on_1D: false, on_1W: false, kind: "sma", tags: true, shape: "step" };
   {
     const { ctx, series } = fakeCtx("5m", { "1h": h1 });
     const hd = IND.mtfma.make(ctx, { params: only1h, color: "#f5c542", width: 1 });
@@ -117,6 +117,22 @@ check("XIRR: 1년 뒤 10% → 10%", xirr([[0, -1000], [365 * day, 1100]]), 0.1, 
     check("멀티 이평 눈금 이름표 켜짐", yes(series[0].o.lastValueVisible && series[0].o.title === "1시간 2"), 1);
     const lg = hd.legend(35);
     check("멀티 이평 범례: 이름 · 거리 % (35 vs 29)", [yes(lg[0].label === "1시간 2"), +lg[0].more.text.replace("%", "")], [1, 20.69], 0.005);
+  }
+  {
+    // 0.17.0 매끄럽게 (처음 값): 5분봉마다 (끝난 1시간봉 1개 + 지금 5분봉 종가) ÷ 2. 둘째 시간 첫 봉(12) = (11+12)/2 = 11.5,
+    // 그 시간 끝 봉(23) = (11+23)/2 = 17 = 계단 값, 맨 끝(35) = (23+35)/2 = 29. 첫 시간은 끝난 봉이 없어서 비움
+    const { ctx, series } = fakeCtx("5m", { "1h": h1 });
+    const hd = IND.mtfma.make(ctx, { params: { ...only1h, shape: "smooth" }, color: "#f5c542", width: 1 });
+    hd.render(b5, 0);
+    const d = series[0].data;
+    check("멀티 이평 매끄럽게: 5분봉마다 (끝난 1시간봉 + 지금 가격) — 12번째 11.5 · 23번째 17(계단과 같음) · 맨 끝 29", [d.length, d[0].time, d[0].value, d[11].value, d[23].value], [24, 12 * 300, 11.5, 17, 29]);
+    const e = fakeCtx("5m", { "1h": h1 });
+    const he = IND.mtfma.make(e.ctx, { params: { ...only1h, shape: "smooth", kind: "ema" }, color: "#f5c542", width: 1 });
+    he.render(b5, 0);
+    // EMA 2 (α = 2/3): 1시간 EMA = [없음, 17(첫 값은 SMA), 29] → 셋째 시간 봉 c: 17 + 2/3 × (c − 17), 맨 끝 35 → 29 (= EMA 확정 값)
+    const de = e.series[0].data;
+    check("멀티 이평 매끄럽게 EMA: 셋째 시간 첫 봉(24) 17 + 2/3×7 · 맨 끝 29", [de.length, de[0].value, de[11].value], [12, 17 + (2 / 3) * 7, 29], 1e-9);
+    check("멀티 이평 처음 모양 = 매끄럽게", wd({ id: "mtfma" }).params.shape === "smooth" ? 1 : 0, 1);
   }
   {
     const { ctx, series } = fakeCtx("4h", { "1h": h1 });

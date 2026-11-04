@@ -227,6 +227,43 @@ export function maOrder(list) {
 /** 지금 가격이 선보다 몇 % 위(+)·아래(−)인지 */
 export const distPct = (price, v) => (price == null || v == null || !v || !Number.isFinite(price / v) ? null : (price / v - 1) * 100);
 
+/**
+ * 멀티 이평 "매끄럽게" (0.17.0, 사용자: "계단식 보니까 웃기다 · 계단/매끄럽게 선택하게"):
+ * 아래 봉마다 "끝난 상위 봉 n−1개 + 그 아래 봉의 종가(= 그 순간 상위 봉의 진행 중 종가)"로 이평을 다시 계산한다.
+ * = 그 순간 상위 봉 차트를 켰다면 보였을 값. 상위 봉의 진행 중 값은 저장소 것(끝난 봉)을 쓰지 않으니 리플레이에서도 미래가 섞이지 않는다.
+ * 상위 봉이 끝나는 아래 봉에서는 계단(mapHtf)과 같은 값이 된다. kind = "sma" | "ema"
+ * o: {htfKey, dayOnly(t) → 이 아래 봉이 상위 봉(일봉 등) 값을 바꾸지 않는 봉이면 true (프리·애프터 → 직전 끝난 값)}
+ */
+export function mapHtfLive(bars, htf, n, kind, o) {
+  const out = new Array(bars.length).fill(null);
+  const key = o.htfKey;
+  const closes = htf.map((b) => b.c);
+  const ps = [0];
+  for (const c of closes) ps.push(ps[ps.length - 1] + c);
+  const em = kind === "ema" ? C.ema(closes, n) : null;
+  const a = 2 / (n + 1);
+  let j = 0;
+  for (let i = 0; i < bars.length; i++) {
+    const k = key(bars[i].t);
+    while (j + 1 < htf.length && htf[j + 1].t <= k) j++;
+    if (!htf[j] || htf[j].t > k) continue;
+    const c = o.dayOnly?.(bars[i].t) ? null : bars[i].c; // 정규장 밖 봉은 일봉을 안 바꾼다 → 직전 끝난 값
+    if (kind === "ema") {
+      const e = em[j - 1];
+      if (e == null) continue;
+      out[i] = c == null ? e : e + a * (c - e);
+    } else {
+      if (c == null) {
+        out[i] = j - n >= 0 ? (ps[j] - ps[j - n]) / n : null;
+        continue;
+      }
+      if (j - (n - 1) < 0) continue;
+      out[i] = (ps[j] - ps[j - (n - 1)] + c) / n;
+    }
+  }
+  return out;
+}
+
 function makeMtfMa(ctx, inst) {
   const p = inst.params;
   const w = inst.width ?? 1;
@@ -253,7 +290,14 @@ function makeMtfMa(ctx, inst) {
         else if (m === "same") L.vals = ema ? C.ema(close(bars), L.n) : C.sma(close(bars), L.n);
         else {
           const htf = ctx.htf(L.tf); // 처음에는 null → 읽고 나서 다시 그린다
-          L.vals = htf ? mapHtf(bars, htf, ema ? C.ema(close(htf), L.n) : C.sma(close(htf), L.n), htfOpt(ctx, L.tf)) : [];
+          if (!htf) L.vals = [];
+          else if (p.shape === "step") L.vals = mapHtf(bars, htf, ema ? C.ema(close(htf), L.n) : C.sma(close(htf), L.n), htfOpt(ctx, L.tf));
+          else {
+            // 매끄럽게 (기본): 일·주봉 줄은 정규장 밖 봉(프리·애프터)에서 값이 안 바뀐다 (저장된 일봉이 정규장만이라)
+            const intraday = ctx.tf !== "1D" && ctx.tf !== "1W";
+            const dayOnly = (L.tf === "1D" || L.tf === "1W") && intraday && ctx.isRegular ? (t) => !ctx.isRegular(t) : null;
+            L.vals = mapHtfLive(bars, htf, L.n, ema ? "ema" : "sma", { htfKey: ctx.htfKeyOf(L.tf), dayOnly });
+          }
         }
         paintLine(L.s, bars, L.vals, ctx.time, from);
       }
@@ -303,6 +347,8 @@ export const INDICATORS = {
         { key: `len_${r.tf}`, label: "기간", def: r.len, min: 1, max: 2000, group: r.tf },
       ]),
       { key: "kind", label: "종류", def: "sma", type: "select", options: [["sma", "단순 (SMA)"], ["ema", "지수 (EMA)"]], tip: "단순: 기간 안의 가격을 똑같이 쳐서 평균\n지수: 최근 가격을 더 크게 쳐서 더 빨리 따라와요" },
+      // 0.17.0 (사용자: "계단/매끄럽게 선택하게"). 처음 값 = 매끄럽게
+      { key: "shape", label: "모양", def: "smooth", type: "select", options: [["smooth", "매끄럽게"], ["step", "계단"]], tip: "매끄럽게: 봉마다 그 순간 큰 봉 차트를 켰다면 보였을 값 (진행 중인 큰 봉 포함, 미래 값 없음)\n계단: 큰 봉이 끝나야 한 칸 바뀌는 확정 값만 (TradingView 기본과 같은 모양)\n큰 봉이 끝나는 순간에는 둘이 같은 값이에요" },
       { key: "tags", label: "눈금에 이름표", def: true, type: "bool", tip: "오른쪽 가격 눈금에 '1시간 20'처럼 선 이름과 지금 값을 붙여요" },
       { key: "fit", label: "선 때문에 화면 안 늘림", def: true, type: "bool", tip: "켜면(기본): 멀리 있는 선(예: 일봉 200) 때문에 캔들이 납작해지지 않아요\n대신 화면 밖으로 나간 선은 안 보여요 (범례의 값과 %는 그대로)\n끄면: TradingView 기본처럼 모든 선이 화면에 들어오게 넓혀요" },
     ],

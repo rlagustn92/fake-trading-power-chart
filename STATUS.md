@@ -1,7 +1,7 @@
 # 작업 현황 — 어디까지 했나 (FAKE TRADING POWER CHART)
 
 **기준일: 2026-11-04 (수요일)** · 이 파일을 고칠 때마다 기준일도 바꾼다.
-**버전 0.16.0** ([CHANGELOG.md](CHANGELOG.md), 2026-11-04 GitHub main에 올림 → Releases v0.16.0이 만들어지면 앱이 알아서 받는다) · 시험 129개 통과 (Rust 13개) · EXE `release\FAKE TRADING POWER CHART.exe` + 바탕화면 바로가기 (2026-10-30, Rust·VS Build Tools·tauri-cli 설치함)
+**버전 0.17.0** ([CHANGELOG.md](CHANGELOG.md), 2026-11-04 GitHub main에 올림 · v0.16.0 Releases 빌드 성공 확인) · 시험 132개 통과 (Rust 13개) · EXE `release\FAKE TRADING POWER CHART.exe` + 바탕화면 바로가기 (2026-10-30, Rust·VS Build Tools·tauri-cli 설치함)
 
 같이 볼 것: 사용법 [README.md](README.md) · 기획 [FAKE_TRADING_기획서.md](FAKE_TRADING_기획서.md) · 데이터 조사 [DATA_RESEARCH.md](DATA_RESEARCH.md) · 다음 할 일 [NEXT_START_HERE.md](NEXT_START_HERE.md) · 원본 기획 [SPEC.md](SPEC.md)
 
@@ -33,6 +33,7 @@
   - 단축키 B·S·X (💰 창이 열려 있고 리플레이 중일 때), Space·→·Esc
   - 기록은 `%APPDATA%\fake-trading-power-chart\trades.json`
 - **0.2.0 (같은 날, 사용자가 써 보고 요청)**: 레버리지 1~20배(증거금 입력) + 청산가선·강제 청산, 분할 매수(추가 진입), 원하는 양 정리(25·50·75%·수량 입력). 처음 써 본 뒤 지표(SMA·VWMA·VWBB·RSI)도 붙여 쓰고 계셨다
+- **0.17.0 (2026-11-04, "계단식 보니까 웃기다 · 계단/매끄럽게 선택하게" → "17버전으로 올려 고치고 알아서")**: 멀티 이평 "모양" 매끄럽게(처음 값)/계단. 매끄럽게 = 아래 봉마다 끝난 큰 봉 n−1개 + 지금 가격 (`mapHtfLive`, EMA는 끝난 봉까지의 EMA + α(가격 − 그것)), 일·주봉 줄은 정규장 밖 봉에서 안 바뀜. 리플레이 3번 + 한 칸 16번(경계 7번)을 1분봉 원본으로 검산해 모두 같음
 - **0.16.0 (2026-11-04, 사용자 아이디어 "5분봉에서 1시간·4시간·일봉 이평을 한 번에")**: 새 지표 🧭 멀티 이평 (15분 20·1시간 20·4시간 20·일봉 200, 주봉 20은 꺼짐 · 줄마다 켜기·기간 · SMA/EMA · TradingView처럼 계단 · 차트보다 작은 봉 줄은 숨김), 눈금 이름표, 범례 거리 %, 정배열·역배열·섞임. 고친 것: 기준 봉이 차트보다 작으면 선이 몰래 차트 봉 이평으로 바뀌던 것 → 숨기고 범례에 "이 봉에선 숨김". 사용자 결정: 봉마다 기간 다르게, 계단(TradingView), 이름표·거리·배열 모두, "버그 없이 유지보수 필요 없게"가 가장 중요. 개발 서버에서 NVDA 24h 5분봉·1시간봉·리플레이로 눌러 확인 (콘솔 오류 없음)
 - **0.15.0 (2026-11-03, "원조처럼 소스는 GitHub, PC에는 EXE와 데이터만")**: 🆕 새 버전 받기 (⚙ 설정 맨 위 "🆕 새 버전 확인", ⚙ 설정 → 화면 "새 버전 알림"). 원조 1.4.0 코드를 옮겨 이름만 맞춤 — 모의매매·차트·리플레이는 그대로 (사용자: "기능적으로는 건들지마"). 개발 서버에서 "새 버전 확인" → 저장소에 아직 Release가 없어서 "GitHub에 아직 받을 버전이 없어요" (오류 없음)
   - 저장소 https://github.com/rlagustn92/fake-trading-power-chart (공개, 파일 122개). 매매 기록이 보이는 화면 사진 4장(`매매일지_화면.jpg`·`모의매매_화면.jpg`·`모의매매_차트.png`·`prototype/screenshot.jpg`)은 사용자 결정으로 PC에만 (.gitignore)

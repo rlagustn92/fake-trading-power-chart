@@ -1,6 +1,6 @@
 [package]
 name = "fake-trading-power-chart"
-version = "0.16.0"
+version = "0.17.0"
 description = "모의매매 + 리플레이 (POWER CHART AND BACKTEST 복제본, 진짜 주문 없음)"
 edition = "2021"
 
