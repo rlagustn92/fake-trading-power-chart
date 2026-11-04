@@ -75,6 +75,77 @@ check("XIRR: 1년 뒤 10% → 10%", xirr([[0, -1000], [365 * day, 1100]]), 0.1, 
   const key = { htfKey: (t) => t, replaying: false };
   check("MTF 미래 값 안 씀: [없음, 없음, A, A, A, B(진행 중 = 맨 끝만)]", mapHtf(low, htf, ["A", "B"].map((x) => (x === "A" ? 1 : 2)), key), [null, null, 1, 1, 1, 2]);
   check("MTF 리플레이 중에는 맨 끝도 끝난 봉 값만", mapHtf(low, htf, [1, 2], { ...key, replaying: true }), [null, null, 1, 1, 1, 1]);
+  // 0.16.0: 리플레이 시각이 그 상위 봉의 끝(10~20 → 20)을 지났으면 끝난 봉이니 그 값. 정각에 멈춘 "⏭ 한 칸"에서 한 칸 늦던 것
+  check("MTF 리플레이: 상위 봉이 아직 진행 중(13) → 직전 값 / 정각(20)에 끝남 → 그 값", [mapHtf(low, htf, [1, 2], { ...key, replaying: true, endT: 13, span: 10 })[5], mapHtf(low, htf, [1, 2], { ...key, replaying: true, endT: 20, span: 10 })[5]], [1, 2]);
+
+  // 0.16.0 기준 봉 비교 · 멀티 이평 (사용자 아이디어 "5분봉에서 1시간·4시간·일봉 이평을 한 번에")
+  const { tfMode, maOrder, distPct, INDICATORS: IND, withDefaults: wd } = await import("../indicators/index.js");
+  const yes = (v) => (v ? 1 : 0);
+  check("기준 봉: 비움·같음 → 차트 봉 / 큰 봉 → 계단 / 작은 봉 → 숨김", [tfMode("", "5m"), tfMode("5m", "5m"), tfMode("1h", "5m"), tfMode("1W", "1D"), tfMode("1h", "4h")].map((x, k) => yes(x === ["same", "same", "htf", "htf", "lower"][k])), [1, 1, 1, 1, 1]);
+  check("이평 배열: 정배열·역배열·섞임·값 하나면 없음", [maOrder([{ span: 3, v: 1 }, { span: 1, v: 3 }, { span: 2, v: 2 }]), maOrder([{ span: 1, v: 1 }, { span: 2, v: 2 }, { span: 3, v: 3 }]), maOrder([{ span: 1, v: 3 }, { span: 2, v: 1 }, { span: 3, v: 2 }]), maOrder([{ span: 1, v: 3 }, { span: 2, v: null }])].map((x, k) => yes(x === ["up", "down", "mix", null][k])), [1, 1, 1, 1]);
+  check("선까지 거리 %: 110 vs 100 → +10, 값 없으면 없음", [distPct(110, 100), distPct(90, 100), distPct(110, null)], [10, -10, null]);
+  check("멀티 이평 처음 기간: 15분 20 · 1시간 20 · 4시간 20 · 일봉 200, 주봉은 꺼짐, 화면 안 늘림 켬", (() => { const q = wd({ id: "mtfma" }).params; return [q.len_15m, q.len_1h, q.len_4h, q.len_1D, yes(q.on_1D), yes(q.on_1W), yes(q.fit)]; })(), [20, 20, 20, 200, 1, 0, 1]);
+  // 가짜 차트 칸: 5분봉 36개(3시간, 종가 = 0, 1, 2 …) + 1시간봉 3개(종가 11, 23, 35)
+  const fakeCtx = (tf, htfs) => {
+    const series = [];
+    const ctx = {
+      tf,
+      replaying: false,
+      time: (t) => t,
+      tfName: (t) => `${t}봉`,
+      fmt: (v) => (v == null ? "—" : v.toFixed(2)),
+      addLine(_, o) {
+        const s = { o, data: [], setData(d) { this.data = d; }, update(pt) { this.data.push(pt); } };
+        series.push(s);
+        return s;
+      },
+      htf: (t) => htfs[t] ?? null,
+      htfKeyOf: () => (x) => x,
+    };
+    return { ctx, series };
+  };
+  const b5 = Array.from({ length: 36 }, (_, k) => ({ t: k * 300, o: k, h: k, l: k, c: k }));
+  const h1 = [11, 23, 35].map((c, k) => ({ t: k * 3600, o: c, h: c, l: c, c }));
+  const only1h = { on_15m: false, on_1h: true, len_1h: 2, on_4h: false, on_1D: false, on_1W: false, kind: "sma", tags: true };
+  {
+    const { ctx, series } = fakeCtx("5m", { "1h": h1 });
+    const hd = IND.mtfma.make(ctx, { params: only1h, color: "#f5c542", width: 1 });
+    hd.render(b5, 0);
+    const d = series[0].data;
+    // 1시간 SMA 2 = [없음, 17, 29] → 두 번째 시간의 마지막 5분봉(23번째)부터 17, 맨 끝(진행 중)은 29
+    check("멀티 이평 5분봉 위 1시간 SMA 2: 계단 (끝난 1시간봉 값만)", [d.length, d[0].time, d[0].value, d[11].value, d[12].value], [13, 23 * 300, 17, 17, 29]);
+    check("멀티 이평 눈금 이름표 켜짐", yes(series[0].o.lastValueVisible && series[0].o.title === "1시간 2"), 1);
+    const lg = hd.legend(35);
+    check("멀티 이평 범례: 이름 · 거리 % (35 vs 29)", [yes(lg[0].label === "1시간 2"), +lg[0].more.text.replace("%", "")], [1, 20.69], 0.005);
+  }
+  {
+    const { ctx, series } = fakeCtx("4h", { "1h": h1 });
+    const hd = IND.mtfma.make(ctx, { params: only1h, color: "#f5c542", width: 1 });
+    hd.render(b5, 0);
+    check("멀티 이평: 차트(4시간)보다 작은 1시간 줄은 숨김", [series[0].data.length, yes(/큰 줄이 없어요/.test(hd.legend(0)[0].value))], [0, 1]);
+  }
+  {
+    // 화면 안 늘림: 켜면 자동 눈금에서 뺀다(autoscaleInfoProvider → null), 끄면 라이브러리 기본(선까지 넣음)
+    const on = fakeCtx("5m", { "1h": h1 });
+    IND.mtfma.make(on.ctx, { params: { ...only1h, fit: true }, color: "#f5c542", width: 1 });
+    const off = fakeCtx("5m", { "1h": h1 });
+    IND.mtfma.make(off.ctx, { params: { ...only1h, fit: false }, color: "#f5c542", width: 1 });
+    check("멀티 이평 '선 때문에 화면 안 늘림': 켬 → 눈금 계산에서 뺌, 끔 → 기본", [yes(on.series[0].o.autoscaleInfoProvider?.() === null), yes(!("autoscaleInfoProvider" in off.series[0].o))], [1, 1]);
+  }
+  {
+    // 0.16.0 브러시 색·두께 (사용자: "브러시 색깔이랑 두께 설정 못 함?"): 처음 주황 2px · 고른 것 · 이상한 값이면 처음 값
+    const { brushStyle, BRUSH_WIDTHS } = await import("../drawings/layer.js");
+    const a = brushStyle({ chart: {} });
+    const b = brushStyle({ chart: { brush: { color: "#3d8bff", width: 5 } } });
+    const c = brushStyle({ chart: { brush: { color: "파랑", width: 9 } } });
+    check("브러시: 처음 주황 2px · 파랑 5px 고르면 그대로 · 이상한 값은 처음 값 · 두께 1~5", [yes(a.color === "#ffb020" && a.width === 2), yes(b.color === "#3d8bff" && b.width === 5), yes(c.color === "#ffb020" && c.width === 2), BRUSH_WIDTHS.length], [1, 1, 1, 5]);
+  }
+  {
+    const { ctx, series } = fakeCtx("4h", { "1h": h1 });
+    const hd = IND.sma.make(ctx, { params: { length: 2, src: "c", tf: "1h" }, color: "#f5c542", width: 1 });
+    hd.render(b5, 0);
+    check("SMA 기준 봉 1시간인데 차트가 4시간 → 숨기고 범례에 알림 (예전엔 4시간 SMA로 몰래 바뀜)", [series[0].data.length, yes(/숨김/.test(hd.legend(0)[0].label))], [0, 1]);
+  }
   // 오프닝 레인지: 9:30~9:45(15분) 고가·저가는 9:45 봉부터, 다음 날은 다시
   const at = (d, hh, mm) => d * 86400 + hh * 3600 + mm * 60;
   const ob = [[0, 9, 30, 10, 8], [0, 9, 35, 12, 9], [0, 9, 40, 11, 7], [0, 9, 45, 13, 10], [1, 9, 30, 20, 19], [1, 9, 45, 21, 18]].map(([d, hh, mm, hi, lo]) => ({ t: at(d, hh, mm), h: hi, l: lo }));
@@ -362,8 +433,8 @@ section("모의매매 체결 규칙 (기획서 §6·§12)");
   const L = { side: 1, entry: 100, tp: 101, sl: 99.5 };
   const S = { side: -1, entry: 100, tp: 99, sl: 100.5 };
   // 결과 → [체결 가격, 1=익절 2=손절] (안 걸리면 [0, 0])
-  const x = (p, o, hi, lo, r = r0) => {
-    const v = E.exitOnBar(p, { o, h: hi, l: lo, c: o }, r);
+  const x = (p, o, hi, lo, r = r0, brk = false) => {
+    const v = E.exitOnBar(p, { o, h: hi, l: lo, c: o, brk }, r);
     return v ? [v.price, v.why === "tp" ? 1 : 2] : [0, 0];
   };
   check("롱 익절: 익절가에 닿기만 하면 안 걸림 (한 틱 넘어야)", x(L, 100.5, 101, 100.2), [0, 0]);
@@ -371,11 +442,14 @@ section("모의매매 체결 규칙 (기획서 §6·§12)");
   check("롱 손절: 손절가에 닿으면 손절가로", x(L, 100, 100.4, 99.5), [99.5, 2]);
   check("롱: 한 봉에서 둘 다 닿으면 손절 먼저", x(L, 100, 102, 99), [99.5, 2]);
   check("롱: 시가가 손절선 아래로 건너뛰면(갭) 시가로", x(L, 99, 99.2, 98.5), [99, 2]);
-  check("롱: 시가가 익절선 위로 건너뛰면 시가로", x(L, 101.5, 102, 101.2), [101.5, 1]);
+  // 0.16.0 (사용자 결정): 걸어 둔 익절(지정가)은 장중 갭이면 익절가 그대로, 거래가 끊겼다 다시 시작된 첫 봉(장 시작·주말 뒤)만 시가
+  check("롱: 장중에 시가가 익절선 위로 건너뛰면 익절가 그대로 (걸어 둔 지정가가 먼저 체결)", x(L, 101.5, 102, 101.2), [101, 1]);
+  check("롱: 장 시작 첫 봉(밤사이 갭)에 익절선 위로 열리면 시가로", x(L, 101.5, 102, 101.2, r0, true), [101.5, 1]);
+  check("롱: 손절 갭은 장중이든 장 시작이든 시가로 (불리하게)", [...x(L, 99, 99.2, 98.5), ...x(L, 99, 99.2, 98.5, r0, true)], [99, 2, 99, 2]);
   check("숏 익절: 닿기만 하면 안 걸림 · 한 틱 넘으면 익절가로", [...x(S, 99.5, 99.8, 99), ...x(S, 99.5, 99.8, 98.99)], [0, 0, 99, 1]);
   check("숏 손절: 손절가에 닿으면 손절가로", x(S, 100, 100.5, 99.8), [100.5, 2]);
   check("숏: 한 봉에서 둘 다 닿으면 손절 먼저", x(S, 100, 101, 98), [100.5, 2]);
-  check("숏: 갭 위로 → 손절 시가 · 갭 아래로 → 익절 시가", [...x(S, 101, 101.2, 100.8), ...x(S, 98.5, 98.7, 98.2)], [101, 2, 98.5, 1]);
+  check("숏: 갭 위로 → 손절 시가 · 장중 갭 아래로 → 익절가 99 · 장 시작 갭 아래로 → 익절 시가", [...x(S, 101, 101.2, 100.8), ...x(S, 98.5, 98.7, 98.2), ...x(S, 98.5, 98.7, 98.2, r0, true)], [101, 2, 99, 1, 98.5, 1]);
   check("손절은 시장가 → 미끄러짐 0.1% (롱 99.5 → 99.4005)", x(L, 100, 100.2, 99.4, E.rules({ slip: 0.1 }))[0], 99.4005, 1e-9);
   const r = E.rules({ fee_taker: 0.09, fee_maker: 0.03, slip: 0.01, tp_pct: 0.5, sl_pct: 0.25 });
   const p = E.open({ side: 1, price: 100, margin: 1000, lev: 1, t: 0, tick: 0.01, r });
@@ -407,15 +481,24 @@ section("모의매매 체결 규칙 (기획서 §6·§12)");
   check("일부 정리: 10주 중 4주를 105에 → +20 − 진입 수수료 몫 0.36 − 0.378 = 19.262 · 남은 6주 · 증거금 60", [n1, pr.qty, pr.margin, pr.fee], [19.262, 6, 60, 0.54], 1e-9);
   const rec = E.close(pr, { price: 110, why: "close", t: 60, sym: "T", r: rl });
   check("나머지 6주를 110에 → 한 번의 매매로 기록: 손익 78.128 · 나간 가격 평균 108 · 증거금 대비 78.1%", [rec.last, rec.net, rec.exit, rec.qty, rec.roe], [58.866, 78.128, 108, 10, 78.128], 1e-9);
+  // 0.16.0: 0.102주를 0.051 · 0.012 · 0.039로 나눠 정리하면 합이 0.10200000000000001 → 기록 수량은 0.102 그대로
+  const pq = { side: 1, qty: 0.102, entry: 100, fee: 0, margin: 10.2, marginIn: 10.2, lev: 1, tp: 120, sl: 95, hi: 100, lo: 100, t: 0 };
+  E.reduce(pq, 0.051, 101, "close", rl);
+  E.reduce(pq, 0.012, 101, "close", rl);
+  check("나눠 정리한 기록의 수량에 소수 찌꺼기가 없다 (0.102)", E.close(pq, { price: 101, why: "close", t: 60, sym: "T", r: rl }).qty === 0.102 ? 1 : 0, 1);
 
   // 미리 깔기 (대기 주문) · 손절 기준 수량 (0.4.0)
   check("대기선 종류: 롱 현재가 아래 = 지정가 · 위 = 돌파 · 숏 위 = 지정가 · 아래 = 돌파", [E.pendingType(1, 99, 100), E.pendingType(1, 101, 100), E.pendingType(-1, 101, 100), E.pendingType(-1, 99, 100)].map((x) => (x === "limit" ? 1 : 2)), [1, 2, 1, 2]);
-  const pf = (o, bo, bh, bl) => {
-    const v = E.fillPending(o, { o: bo, h: bh, l: bl, c: bo }, rl);
+  const pf = (o, bo, bh, bl, brk = false) => {
+    const v = E.fillPending(o, { o: bo, h: bh, l: bl, c: bo, brk }, rl);
     return v ? [v.price, v.maker ? 1 : 0] : [0, 0];
   };
   const lim = { side: 1, price: 99, type: "limit" };
-  check("롱 지정가 99: 닿기만 하면 안 됨 · 한 틱 넘으면 99에 지정가 수수료 · 시가가 98.5로 건너뛰면 98.5", [...pf(lim, 99.5, 100, 99), ...pf(lim, 99.5, 100, 98.99), ...pf(lim, 98.5, 99, 98)], [0, 0, 99, 1, 98.5, 1]);
+  check("롱 지정가 99: 닿기만 하면 안 됨 · 한 틱 넘으면 99에 지정가 수수료 · 장중 98.5로 건너뛰면 99 · 장 시작 첫 봉이면 98.5", [...pf(lim, 99.5, 100, 99), ...pf(lim, 99.5, 100, 98.99), ...pf(lim, 98.5, 99, 98), ...pf(lim, 98.5, 99, 98, true)], [0, 0, 99, 1, 99, 1, 98.5, 1]);
+  // 끊긴 뒤 첫 봉 (0.16.0): 1분봉이 이어지면 아님 · 30분 넘게 비면(미국 주식 16:00 → 다음 날 9:30) 맞음 · 주식 일봉은 늘 맞음 · 24시간 코인 일봉은 아님 · 앞 봉 모름 = 맞음
+  const MIN1 = 60;
+  const DAY1 = 86400;
+  check("끊긴 뒤 첫 봉: 이어진 1분봉 · 20분 빔 · 장 마감 → 다음 날 장 시작 · 주식 일봉 · 코인 일봉 · 앞 봉 없음", [E.isBreak({ t: 0 }, { t: MIN1 }, MIN1, false), E.isBreak({ t: 0 }, { t: 21 * MIN1 }, MIN1, false), E.isBreak({ t: 0 }, { t: 17.5 * 3600 }, MIN1, false), E.isBreak({ t: 0 }, { t: DAY1 }, DAY1, false), E.isBreak({ t: 0 }, { t: DAY1 }, DAY1, true), E.isBreak(undefined, { t: 0 }, MIN1, true)].map((v) => (v ? 1 : 0)), [0, 0, 1, 1, 0, 1]);
   const stp = { side: 1, price: 101, type: "stop" };
   check("롱 돌파 101: 닿으면 시장가 · 시가가 102로 건너뛰면 102 (미끄러짐 0)", [...pf(stp, 100, 101, 99.8), ...pf(stp, 102, 102.5, 101.5)], [101, 0, 102, 0]);
   const sh = { side: -1, price: 101, type: "limit" };

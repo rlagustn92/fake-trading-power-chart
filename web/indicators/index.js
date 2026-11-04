@@ -48,6 +48,9 @@ function paintHist(series, bars, vals, time, from, color) {
 export function mapHtf(bars, htf, vals, o) {
   const out = new Array(bars.length).fill(null);
   const key = o.htfKey; // 지금 봉 시각 → 상위 봉과 비교할 값 (상위 봉마다 다르다: 일봉은 날짜, 15분은 시각)
+  // 리플레이 중 맨 끝 봉: 그 상위 봉이 리플레이 시각(o.endT)까지 다 지났으면 끝난 봉이니 그 값 (0.16.0).
+  // 전에는 늘 직전 상위 봉 값이라, "⏭ 한 칸"으로 15:00 정각에 멈추면 방금 끝난 14시 1시간봉이 아니라 13시 봉 값이 보였다 (한 칸 늦음, 미래 값은 아님)
+  const doneBy = (j0) => o.replaying && o.endT != null && o.span > 0 && key(o.endT) >= htf[j0].t + o.span;
   const idx = new Array(bars.length).fill(-1);
   let j = 0;
   for (let i = 0; i < bars.length; i++) {
@@ -58,12 +61,29 @@ export function mapHtf(bars, htf, vals, o) {
   for (let i = 0; i < bars.length; i++) {
     const j0 = idx[i];
     if (j0 < 0) continue;
-    const lastOfHtf = i + 1 < bars.length ? idx[i + 1] !== j0 : !o.replaying && j0 === htf.length - 1;
+    const lastOfHtf = i + 1 < bars.length ? idx[i + 1] !== j0 : o.replaying ? doneBy(j0) : j0 === htf.length - 1;
     const v = lastOfHtf ? vals[j0] : vals[j0 - 1];
     out[i] = v ?? null;
   }
   return out;
 }
+
+/** mapHtf에 넘길 것: 시각 → 비교 값, 리플레이 중인지, 리플레이 시각, 상위 봉 길이(초) — 모든 "기준 봉" 지표가 같이 쓴다 */
+const htfOpt = (ctx, tf) => ({ htfKey: ctx.htfKeyOf(tf), replaying: ctx.replaying, endT: ctx.replayEnd, span: TF_SEC[tf] });
+
+/**
+ * 기준 봉(want)과 차트 봉 비교 (0.16.0): "same" 차트 봉으로 계산 · "htf" 큰 봉으로 계산해 계단 · "lower" 차트보다 작은 봉이라 숨김.
+ * 예전에는 "lower"일 때 조용히 차트 봉으로 계산해서, 4시간봉 차트의 "SMA 20 (1시간봉)"이 실제로는 4시간 SMA 20이었다.
+ */
+export function tfMode(want, chartTf) {
+  if (!want || want === chartTf) return "same";
+  return TF_SEC[want] > TF_SEC[chartTf] ? "htf" : "lower";
+}
+/** 범례 이름 뒤에 붙는 기준 봉: "" · " (1시간봉)" · " (1시간봉 · 이 봉에선 숨김)" */
+const tfTag = (want, ctx) => {
+  const m = tfMode(want, ctx.tf);
+  return m === "same" ? "" : ` (${ctx.tfName(want)}${m === "lower" ? " · 이 봉에선 숨김" : ""})`;
+};
 
 /** 가격 창 이동평균류 공통 (SMA·EMA·VWMA) — 기준 봉(tf)이 다르면 그 봉으로 계산. fn(bars, 기간, params) */
 function maIndicator(fn, short) {
@@ -72,10 +92,12 @@ function maIndicator(fn, short) {
     const s = ctx.addLine(0, { color: inst.color, lineWidth: inst.width ?? 1 });
     let vals = [];
     const calc = (bars) => {
-      if (p.tf && p.tf !== ctx.tf && TF_SEC[p.tf] > TF_SEC[ctx.tf]) {
+      const m = tfMode(p.tf, ctx.tf);
+      if (m === "lower") return new Array(bars.length).fill(null);
+      if (m === "htf") {
         const htf = ctx.htf(p.tf);
         if (!htf) return new Array(bars.length).fill(null);
-        return mapHtf(bars, htf, fn(htf, p.length, p), { htfKey: ctx.htfKeyOf(p.tf), replaying: ctx.replaying });
+        return mapHtf(bars, htf, fn(htf, p.length, p), htfOpt(ctx, p.tf));
       }
       return fn(bars, p.length, p);
     };
@@ -86,7 +108,7 @@ function maIndicator(fn, short) {
         vals = calc(bars);
         paintLine(s, bars, vals, ctx.time, from);
       },
-      legend: (i) => [{ label: `${short} ${p.length}${srcName}${p.tf && p.tf !== ctx.tf ? ` (${ctx.tfName(p.tf)})` : ""}`, value: ctx.fmt(vals[i]), color: inst.color }],
+      legend: (i) => [{ label: `${short} ${p.length}${srcName}${tfTag(p.tf, ctx)}`, value: ctx.fmt(vals[i]), color: inst.color }],
     };
   };
 }
@@ -113,7 +135,7 @@ function bandIndicator(calc, short) {
     const fill = new BandFill(hexA(inst.color, 0.08));
     ctx.attach(fill);
     let r = { basis: [], upper: [], lower: [] };
-    const htfOn = () => p.tf && p.tf !== ctx.tf && TF_SEC[p.tf] > TF_SEC[ctx.tf];
+    const htfOn = () => tfMode(p.tf, ctx.tf) === "htf";
     // 한 묶음 봉으로 계산: 가운데·위·아래 (+ ±1σ·±3σ)
     const calcAll = (src) => {
       const x = calc(src, p);
@@ -127,12 +149,13 @@ function bandIndicator(calc, short) {
       series: [mid, up, dn, ...extra.map((e) => e.s)],
       prims: [fill],
       render(bars, from) {
-        if (htfOn()) {
+        if (tfMode(p.tf, ctx.tf) === "lower") r = { basis: [], upper: [], lower: [] }; // 차트보다 작은 기준 봉 → 숨김 (0.16.0)
+        else if (htfOn()) {
           const htf = ctx.htf(p.tf);
           if (!htf) r = { basis: [], upper: [], lower: [] };
           else {
             const h = calcAll(htf);
-            const o2 = { htfKey: ctx.htfKeyOf(p.tf), replaying: ctx.replaying };
+            const o2 = htfOpt(ctx, p.tf);
             r = Object.fromEntries(Object.entries(h).map(([k, v]) => [k, mapHtf(bars, htf, v, o2)]));
           }
         } else r = calcAll(bars);
@@ -144,7 +167,7 @@ function bandIndicator(calc, short) {
       },
       legend: (i) => [
         {
-          label: `${short} ${p.length} ${p.mult}${htfOn() ? ` (${ctx.tfName(p.tf)})` : ""}${p.tvLower ? " TV" : ""}`,
+          label: `${short} ${p.length} ${p.mult}${tfTag(p.tf, ctx)}${p.tvLower ? " TV" : ""}`,
           value: `${ctx.fmt(r.upper[i])} / ${ctx.fmt(r.basis[i])} / ${ctx.fmt(r.lower[i])}`,
           color: inst.color,
         },
@@ -173,6 +196,87 @@ const divSeg = (d, pa, pb, label) => {
   return { a: d.a, pa, b: d.b, pb, color: k.hidden ? hexA(k.color, 0.8) : k.color, dash: !!k.hidden, label: label ? k.name : "", above: !k.low };
 };
 
+// ── 멀티 이평 (0.16.0, 사용자 아이디어: "5분봉에서 1시간·4시간·일봉 이평을 한 번에") ──
+// 줄마다 봉·기간을 따로 켜고 끈다. 큰 봉 줄은 '기준 봉'과 같은 규칙(mapHtf: 끝난 상위 봉 값만, TradingView lookahead_off)으로 계단.
+// 차트 봉과 같은 줄은 차트 봉으로 계산, 차트보다 작은 봉 줄은 숨긴다 (tfMode). 색은 줄마다 정해 두고, 큰 봉일수록 굵게(w)
+export const MTF_ROWS = [
+  { tf: "15m", len: 20, on: true, color: "#5ec8d8", w: 0 },
+  { tf: "1h", len: 20, on: true, color: "#f5c542", w: 0 },
+  { tf: "4h", len: 20, on: true, color: "#b18cff", w: 1 },
+  { tf: "1D", len: 200, on: true, color: "#ff8a3d", w: 1 },
+  { tf: "1W", len: 20, on: false, color: "#e8eaed", w: 2 },
+];
+const MTF_KO = { "15m": "15분", "1h": "1시간", "4h": "4시간", "1D": "일봉", "1W": "주봉" };
+
+/**
+ * 이평선 배열 (0.16.0): 짧은 선(봉 길이 × 기간이 짧은 것)부터 늘어놓아
+ * 위→아래로 차례면 "up"(정배열), 아래→위로 차례면 "down"(역배열), 아니면 "mix". 값이 2개 안 되면 null.
+ * list = [{ span: 초, v: 값 }]
+ */
+export function maOrder(list) {
+  const xs = list.filter((x) => x.v != null && Number.isFinite(x.v)).sort((a, b) => a.span - b.span);
+  if (xs.length < 2) return null;
+  let up = true;
+  let dn = true;
+  for (let k = 1; k < xs.length; k++) {
+    if (!(xs[k - 1].v > xs[k].v)) up = false;
+    if (!(xs[k - 1].v < xs[k].v)) dn = false;
+  }
+  return up ? "up" : dn ? "down" : "mix";
+}
+/** 지금 가격이 선보다 몇 % 위(+)·아래(−)인지 */
+export const distPct = (price, v) => (price == null || v == null || !v || !Number.isFinite(price / v) ? null : (price / v - 1) * 100);
+
+function makeMtfMa(ctx, inst) {
+  const p = inst.params;
+  const w = inst.width ?? 1;
+  const ema = p.kind === "ema";
+  const lines = MTF_ROWS.filter((r) => p[`on_${r.tf}`]).map((r) => {
+    const n = Math.max(1, Math.round(p[`len_${r.tf}`] ?? r.len));
+    const name = `${MTF_KO[r.tf]} ${ema ? "EMA " : ""}${n}`;
+    // B. 선 이름표: 오른쪽 가격 눈금에 이름 + 지금 값 (lightweight-charts가 눈금 글자끼리 겹치지 않게 비켜 놓는다)
+    // 화면 높이 안 늘림 (기본 켬, 사용자 결정 2026-11-04): 먼 선(일봉 200 등) 때문에 캔들이 납작해지지 않게 자동 눈금 계산에서 뺀다.
+    // 대신 화면 밖으로 나간 선과 그 이름표는 안 보인다 (범례의 값·%는 그대로). 끄면 TradingView 기본처럼 선까지 화면에 넣는다
+    const noFit = p.fit ? { autoscaleInfoProvider: () => null } : {};
+    const s = ctx.addLine(0, { color: r.color, lineWidth: Math.min(4, w + r.w), lastValueVisible: !!p.tags, title: p.tags ? name : "", ...noFit });
+    return { tf: r.tf, n, name, color: r.color, s, vals: [] };
+  });
+  let last = [];
+  const shown = () => lines.filter((L) => tfMode(L.tf, ctx.tf) !== "lower");
+  return {
+    series: lines.map((L) => L.s),
+    render(bars, from) {
+      last = bars;
+      for (const L of lines) {
+        const m = tfMode(L.tf, ctx.tf);
+        if (m === "lower") L.vals = [];
+        else if (m === "same") L.vals = ema ? C.ema(close(bars), L.n) : C.sma(close(bars), L.n);
+        else {
+          const htf = ctx.htf(L.tf); // 처음에는 null → 읽고 나서 다시 그린다
+          L.vals = htf ? mapHtf(bars, htf, ema ? C.ema(close(htf), L.n) : C.sma(close(htf), L.n), htfOpt(ctx, L.tf)) : [];
+        }
+        paintLine(L.s, bars, L.vals, ctx.time, from);
+      }
+    },
+    legend(i) {
+      const vis = shown();
+      if (!vis.length) return [{ label: "멀티 이평", value: "이 봉보다 큰 줄이 없어요 (설정에서 켜기)", color: inst.color }];
+      const price = last[i]?.c;
+      const items = [];
+      // E. 정배열·역배열 (짧은 선이 위·긴 선이 아래로 차례면 정배열)
+      const ord = maOrder(vis.map((L) => ({ span: TF_SEC[L.tf] * L.n, v: L.vals[i] })));
+      if (ord) items.push({ label: ord === "up" ? "정배열 ▲" : ord === "down" ? "역배열 ▼" : "섞임", value: "", color: ord === "up" ? upColor() : ord === "down" ? downColor() : "#a0a6ae" });
+      vis.forEach((L, k) => {
+        // D. 거리: 지금 가격이 이 선보다 몇 % 위·아래
+        const d = distPct(price, L.vals[i]);
+        if (k > 0) items.push({ br: true });
+        items.push({ label: L.name, value: ctx.fmt(L.vals[i]), color: L.color, more: d == null ? null : { text: `${d >= 0 ? "+" : ""}${d.toFixed(2)}%`, cls: d > 0 ? "up" : d < 0 ? "down" : "flat" } });
+      });
+      return items;
+    },
+  };
+}
+
 export const INDICATORS = {
   sma: {
     short: "SMA",
@@ -187,6 +291,23 @@ export const INDICATORS = {
     params: [lenParam(20), srcParam, tfParam],
     color: "#ff8a3d",
     make: maIndicator((bars, n, p) => C.ema(C.source(bars, p.src), n), "EMA"),
+  },
+  // 멀티 이평 (0.16.0): 15분·1시간·4시간·일봉·주봉 이동평균을 한 지표로. 설정 칸에서 줄마다 [✓ 봉] [기간]이 한 묶음(group)
+  mtfma: {
+    short: "멀티 이평",
+    pane: "price",
+    noColor: true, // 색은 줄마다 정해져 있다 (MTF_ROWS) → 지표 창에 색 고르기를 안 띄운다
+    params: [
+      ...MTF_ROWS.flatMap((r) => [
+        { key: `on_${r.tf}`, label: `${MTF_KO[r.tf]}${r.tf.endsWith("D") || r.tf.endsWith("W") ? "" : "봉"}`, def: r.on, type: "bool", group: r.tf },
+        { key: `len_${r.tf}`, label: "기간", def: r.len, min: 1, max: 2000, group: r.tf },
+      ]),
+      { key: "kind", label: "종류", def: "sma", type: "select", options: [["sma", "단순 (SMA)"], ["ema", "지수 (EMA)"]], tip: "단순: 기간 안의 가격을 똑같이 쳐서 평균\n지수: 최근 가격을 더 크게 쳐서 더 빨리 따라와요" },
+      { key: "tags", label: "눈금에 이름표", def: true, type: "bool", tip: "오른쪽 가격 눈금에 '1시간 20'처럼 선 이름과 지금 값을 붙여요" },
+      { key: "fit", label: "선 때문에 화면 안 늘림", def: true, type: "bool", tip: "켜면(기본): 멀리 있는 선(예: 일봉 200) 때문에 캔들이 납작해지지 않아요\n대신 화면 밖으로 나간 선은 안 보여요 (범례의 값과 %는 그대로)\n끄면: TradingView 기본처럼 모든 선이 화면에 들어오게 넓혀요" },
+    ],
+    color: "#f5c542",
+    make: makeMtfMa,
   },
   // 듀얼 이동평균 밴드 (0.14.0, 사용자가 본 유튜브 "이동평균 매매법" 14:30~): 같은 길이 이동평균을 종가·고가·저가로 세 줄 → 좁은 밴드.
   // 종가가 밴드 위로 마감 = 강세(롱 자리), 아래로 마감 = 약세(숏 자리), 밴드 안에서 마감 = 정리·쉬기. 200선은 큰 추세 확인 (영상의 "레벨 2")
@@ -213,14 +334,15 @@ export const INDICATORS = {
       let r = empty;
       const ma = (vals, n) => (p.kind === "ema" ? C.ema(vals, n) : C.sma(vals, n));
       const calc = (src) => ({ mid: ma(C.source(src, "c"), p.length), up: ma(C.source(src, "h"), p.length), dn: ma(C.source(src, "l"), p.length), l200: p.show200 ? ma(C.source(src, "c"), 200) : [] });
-      const htfOn = () => p.tf && p.tf !== ctx.tf && TF_SEC[p.tf] > TF_SEC[ctx.tf];
+      const htfOn = () => tfMode(p.tf, ctx.tf) === "htf";
       return {
         series: [mid, up, dn, long].filter(Boolean),
         prims: [fill],
         render(bars, from) {
-          if (htfOn()) {
+          if (tfMode(p.tf, ctx.tf) === "lower") r = empty; // 차트보다 작은 기준 봉 → 숨김 (0.16.0)
+          else if (htfOn()) {
             const htf = ctx.htf(p.tf);
-            const o2 = { htfKey: ctx.htfKeyOf(p.tf), replaying: ctx.replaying };
+            const o2 = htfOpt(ctx, p.tf);
             r = htf ? Object.fromEntries(Object.entries(calc(htf)).map(([k, v]) => [k, mapHtf(bars, htf, v, o2)])) : empty;
           } else r = calc(bars);
           paintLine(mid, bars, r.mid, ctx.time, from);
@@ -231,7 +353,7 @@ export const INDICATORS = {
         },
         legend: (i) =>
           [
-            { label: `듀얼 이평 ${p.length}${p.kind === "ema" ? " EMA" : ""}${htfOn() ? ` (${ctx.tfName(p.tf)})` : ""}`, value: `${ctx.fmt(r.up[i])} / ${ctx.fmt(r.mid[i])} / ${ctx.fmt(r.dn[i])}`, color: inst.color },
+            { label: `듀얼 이평 ${p.length}${p.kind === "ema" ? " EMA" : ""}${tfTag(p.tf, ctx)}`, value: `${ctx.fmt(r.up[i])} / ${ctx.fmt(r.mid[i])} / ${ctx.fmt(r.dn[i])}`, color: inst.color },
             long ? { label: "200", value: ctx.fmt(r.l200[i]), color: "#e8eaed" } : null,
           ].filter(Boolean),
       };
@@ -796,4 +918,4 @@ export function withDefaults(inst, k = 0) {
 }
 
 /** 지표 목록 화면 순서 */
-export const ORDER = ["sma", "ema", "dualma", "vwma", "bb", "vwbb", "volume", "rvol", "rsi", "rsi_div", "macd", "stoch", "atr", "drawdown", "disparity", "fractals", "hl52", "triangle_auto", "vwap", "vpvr", "orb", "pdhl", "pivots"];
+export const ORDER = ["sma", "ema", "mtfma", "dualma", "vwma", "bb", "vwbb", "volume", "rvol", "rsi", "rsi_div", "macd", "stoch", "atr", "drawdown", "disparity", "fractals", "hl52", "triangle_auto", "vwap", "vpvr", "orb", "pdhl", "pivots"];

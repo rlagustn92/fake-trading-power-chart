@@ -359,6 +359,9 @@ table.keys td { padding: 6px 12px 6px 0; font-size: 16px; }
 .ind-params { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 6px; align-items: center; font-size: 15px; }
 .ind-param { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
 .ind-param button { min-height: 38px; min-width: 38px; padding: 0; }
+/* 멀티 이평 한 줄 = [✓ 1시간봉] [기간 20] 한 상자 (0.16.0). 차트보다 작은 봉 줄은 흐리게 */
+.ind-group { display: inline-flex; align-items: center; gap: 8px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 10px; }
+.ind-group.dim { opacity: 0.45; }
 .ind-param .set-sel { min-height: 38px; font-size: 15px; }
 .ind-colors { display: inline-flex; flex-wrap: wrap; gap: 4px; max-width: 290px; } /* 16색 + 🎨 → 두 줄 (0.13.0) */
 .swatch { min-width: 28px; min-height: 28px; width: 28px; height: 28px; padding: 0; border-radius: 50%; border: 2px solid transparent; }
@@ -399,6 +402,15 @@ table.keys td { padding: 6px 12px 6px 0; font-size: 16px; }
 .dw-ico { font-size: 20px; line-height: 1.1; }
 .dw-name { font-size: 12px; color: #c9ced6; font-weight: 600; }
 .dw-tool.on .dw-name { color: #0b0d10; }
+/* 브러시를 켜면 보이는 색·두께 (0.16.0) */
+.dw-brush { display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; flex-shrink: 0; border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
+.dw-brush[hidden] { display: none; }
+.dw-brush .swatch { min-width: 22px; min-height: 22px; width: 22px; height: 22px; }
+.dw-brush .swatch-pick { width: 22px; height: 22px; }
+.dw-w { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; min-height: 48px; min-width: 38px; padding: 0 4px; flex-shrink: 0; }
+.dw-w-line { display: block; width: 24px; border-radius: 3px; }
+.dw-w-num { font-size: 12px; color: #c9ced6; font-weight: 600; }
+.dw-w.on .dw-w-num { color: #0b0d10; }
 .dw-hint { font-size: 16px; color: #ffb020; font-weight: 700; padding: 0 10px; white-space: nowrap; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .cell-body.drawing canvas { cursor: crosshair !important; }
 .cell-body.dw-hover canvas { cursor: pointer !important; }

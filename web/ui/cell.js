@@ -448,6 +448,10 @@ export function createCell(env, cc) {
     get replaying() {
       return !!replay;
     },
+    /** 리플레이 시각 (그때까지 끝난 것만 보인다) → 기준 봉 지표가 "정각에 막 끝난 상위 봉"을 알아본다 (0.16.0) */
+    get replayEnd() {
+      return replay?.endT ?? null;
+    },
     /** 자동 삼각수렴 → 직접 그린 Triangle Pattern으로 고정 */
     pinTriangle(tri) {
       const m = createMapper(drawView());
@@ -494,7 +498,11 @@ export function createCell(env, cc) {
     try {
       const s = await loadSeries(info, t, all ? { basis: basis(), ext: ext() } : { basis: basis(), ext: ext(), after, limit: Math.min(60000, Math.ceil((last - after) / TF_SEC[t]) + 50) });
       if (my !== token) return;
-      htfCache.set(key, { bars: s.bars, from: after, to: last, live: all || !windowed });
+      // 읽은 범위의 끝 = 읽은 마지막 상위 봉이 끝나는 때. 리플레이 중에 읽은 것은 그 시각 근처까지만 있으니 "지금까지(live)"로 치지 않는다.
+      // 0.16.0: 전에는 리플레이 중에도 live로 남겨서, 리플레이를 다시 시작하거나 끝낸 뒤 이 옛 자료를 계속 써 선이 옛 값에 멈췄다
+      // (시험: BTC 5분봉 "15분 20" = 63,030 · 지금 가격 78,000. 예전 "기준 봉" SMA도 같았다)
+      const lastHtf = s.bars.length ? s.bars[s.bars.length - 1].t + TF_SEC[t] : last;
+      htfCache.set(key, { bars: s.bars, from: after, to: Math.max(last, lastHtf), live: all || (!replay && !windowed) });
       renderIndicators(0);
       paintLegend(); // 범례가 "—"로 남지 않게 (QA N10)
     } catch (e) {
@@ -915,20 +923,30 @@ export function createCell(env, cc) {
       try {
         items = hd.legend(i) ?? [];
       } catch {}
-      const row = h("div.lg-row.lg-ind", {
-        "data-tip": hd.inst.id,
-        onclick: () => env.onIndicatorClick?.(api, hd.inst),
-        oncontextmenu: (e) => {
-          e.preventDefault();
-          env.onIndicatorMenu?.(api, hd.inst, e);
-        },
-      });
+      const newRow = () =>
+        h("div.lg-row.lg-ind", {
+          "data-tip": hd.inst.id,
+          onclick: () => env.onIndicatorClick?.(api, hd.inst),
+          oncontextmenu: (e) => {
+            e.preventDefault();
+            env.onIndicatorMenu?.(api, hd.inst, e);
+          },
+        });
+      let row = newRow();
       for (const it of items) {
+        if (!it) continue;
+        // 멀티 이평 (0.16.0): br = 다음 줄로, more = 값 뒤에 색 글자 (거리 %)
+        if (it.br) {
+          rows.push(row);
+          row = newRow();
+          continue;
+        }
         if (it.action) {
           row.append(h("button.lg-act", { "data-tip-text": it.action.tip, onclick: (e) => (e.stopPropagation(), it.action.onclick()) }, it.action.text));
           continue;
         }
-        row.append(h("span.lg-name", { style: `color:${it.color}` }, it.label), it.value ? h("span.lg-val", ` ${it.value}  `) : " ");
+        row.append(h("span.lg-name", { style: `color:${it.color}` }, it.label), it.value ? h("span.lg-val", ` ${it.value}${it.more ? " " : "  "}`) : " ");
+        if (it.more) row.append(h(`span.lg-v.${it.more.cls}`, `${it.more.text}  `));
       }
       rows.push(row);
     }
@@ -1436,11 +1454,23 @@ export function createCell(env, cc) {
   }
   function cutTo(endT, first) {
     replay.endT = endT;
-    const n = Math.max(1, countEnded(replay.full, endT));
+    const n = countEnded(replay.full, endT);
     const next = replay.full.slice(0, n);
     const part = partialBar(n, endT);
     if (part) next.push(part);
-    if (first) {
+    if (!next.length) {
+      // 이 칸에는 그 시각까지의 봉이 없다 (예: 야후 5분봉은 최근 60일뿐, 분할 화면에서 같이 가는 칸) → 비워 둔다.
+      // 0.16.0: 전에는 "최소 1개"를 보여 주느라 그 뒤의 첫 봉(미래)이 보였다 (8/17 리플레이에 삼성전자 8/26 09:00 봉)
+      bars = [];
+      main.setData([]);
+      renderIndicators(0);
+      showMsg(`리플레이 시각에는 ${info.label} ${TF_NAME[tf]}봉 자료가 없어요\n자료가 있는 때에 닿으면 나타나요`);
+      paintLegend();
+      paintHead();
+      extendReplay(0);
+      return;
+    }
+    if (first || !bars.length) {
       const ts = chart.timeScale();
       const was = ts.getVisibleLogicalRange();
       setBars(next, "keep");

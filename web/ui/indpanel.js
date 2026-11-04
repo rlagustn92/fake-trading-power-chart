@@ -41,6 +41,7 @@ export function createIndicatorPanel(root, { getCell, apply, cfg }) {
             const k = list.filter((x) => x.id === id).length;
             const inst = withDefaults({ id, color: k ? PALETTE[(list.length + 1) % PALETTE.length] : undefined }, k);
             focusUid = inst.uid;
+            showFocus = true; // 새로 넣은 지표(맨 아래)가 보이게
             commit([...list, inst]);
           },
         },
@@ -82,11 +83,23 @@ export function createIndicatorPanel(root, { getCell, apply, cfg }) {
             h(
               "select.set-sel",
               { onchange: (ev) => setP(p.key, ev.target.value) },
-              TFS.filter((t) => !t || t === inst.params[p.key] || TF_SEC[t] > TF_SEC[cell.tf]).map((t) => h("option", { value: t, selected: (inst.params[p.key] ?? "") === t }, t ? `${TF_NAME[t]}봉` : "차트와 같음"))
+              TFS.filter((t) => !t || t === inst.params[p.key] || TF_SEC[t] > TF_SEC[cell.tf]).map((t) => h("option", { value: t, selected: (inst.params[p.key] ?? "") === t }, t ? `${TF_NAME[t]}봉${TF_SEC[t] < TF_SEC[cell.tf] ? " (이 봉에선 숨김)" : ""}` : "차트와 같음"))
             )
           );
         }
         return h("span.ind-param", p.label, stepper(() => inst.params[p.key], (v) => setP(p.key, v), { step: p.step ?? 1, min: p.min ?? 0, max: p.max ?? 9999 }));
+      });
+      // 같은 group(멀티 이평의 한 줄: [✓ 1시간봉] [기간 20])은 한 상자로 묶는다 (0.16.0). 차트보다 작은 봉 줄은 흐리게
+      const boxes = [];
+      d.params.forEach((p, k) => {
+        const prev = boxes[boxes.length - 1];
+        if (p.group && prev?.group === p.group) prev.els.push(params[k]);
+        else boxes.push({ group: p.group, els: [params[k]] });
+      });
+      const paramEls = boxes.map((b) => {
+        if (!b.group) return b.els[0];
+        const small = TF_SEC[b.group] < TF_SEC[cell.tf];
+        return h(`span.ind-group${small ? ".dim" : ""}`, { "data-tip-text": small ? `차트가 ${TF_NAME[cell.tf]}봉이라 이 줄(${TF_NAME[b.group]}봉)은 안 보여요\n차트보다 크거나 같은 봉만 그려요` : "" }, b.els);
       });
       const colors = h(
         "span.ind-colors",
@@ -105,7 +118,7 @@ export function createIndicatorPanel(root, { getCell, apply, cfg }) {
           h(`button${inst.hidden ? "" : ".on"}`, { onclick: () => set({ hidden: !inst.hidden }) }, inst.hidden ? "숨김" : "보임"),
           h("button", { onclick: () => commit(list.filter((_, k) => k !== i)) }, "빼기")
         ),
-        h("div.ind-params", params, d.pane === "price" || inst.id === "rsi" || inst.id === "rsi_div" ? colors : null, h("span.ind-param", "두께", stepper(() => inst.width ?? 1, (v) => set({ width: v }), { step: 1, min: 1, max: 4 })))
+        h("div.ind-params", paramEls, (d.pane === "price" && !d.noColor) || inst.id === "rsi" || inst.id === "rsi_div" ? colors : null, h("span.ind-param", "두께", stepper(() => inst.width ?? 1, (v) => set({ width: v }), { step: 1, min: 1, max: 4 })))
       );
     });
 
@@ -130,6 +143,12 @@ export function createIndicatorPanel(root, { getCell, apply, cfg }) {
       h("button", { onclick: () => { cfg.indicators = current().map(({ uid, ...x }) => x); cfg.save(); render(); }, "data-tip-text": "새 칸을 만들 때 이 조합으로 시작해요" }, "새 칸 기본으로 쓰기")
     );
 
+    // 0.16.0 (사용자: "설정을 바꾸면 창이 다시 맨 위로 올라가서 은근 불편해"): 바꿀 때마다 창을 새로 그리니까
+    // 보던 스크롤 자리를 기억했다가 그대로 돌려놓는다. 새로 넣었거나 범례에서 눌러 연 지표는 그 줄이 보이게
+    const keep = (sel) => (scrollReset ? 0 : root.querySelector(sel)?.scrollTop ?? 0);
+    const topAvail = keep(".ind-avail");
+    const topMine = keep(".ind-mine");
+    scrollReset = false;
     root.replaceChildren(
       h(
         "div.panel.indpanel",
@@ -138,11 +157,23 @@ export function createIndicatorPanel(root, { getCell, apply, cfg }) {
         h("div.ind-cols", h("div.ind-avail", h("h3", "넣을 수 있는 지표"), avail), h("div.ind-mine", h("h3", `이 칸의 지표 ${list.length}개`), mine.length ? mine : h("p.hint", "왼쪽에서 눌러서 넣으세요")))
       )
     );
+    const a = root.querySelector(".ind-avail");
+    const m = root.querySelector(".ind-mine");
+    if (a) a.scrollTop = topAvail;
+    if (m) m.scrollTop = topMine;
+    if (showFocus) {
+      showFocus = false;
+      root.querySelector(".ind-row.focus")?.scrollIntoView({ block: "nearest" });
+    }
   }
+  let scrollReset = false; // 창을 새로 열 때는 맨 위부터
+  let showFocus = false; // 다음 그리기에서 고른 지표 줄이 보이게
 
   function open(uid = null) {
     focusUid = uid;
     root.hidden = false;
+    scrollReset = true;
+    showFocus = !!uid;
     render();
   }
   function close() {

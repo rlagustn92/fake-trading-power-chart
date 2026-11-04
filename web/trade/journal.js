@@ -72,7 +72,7 @@ export function toCsv(trades) {
     tr.tf ?? "",
     tr.side > 0 ? "롱" : "숏",
     r2(tr.lev ?? 1),
-    tr.qty,
+    Math.round(tr.qty * 1000) / 1000, // 예전 기록의 0.10200000000000001 같은 찌꺼기 (0.16.0)
     r4(tr.entry),
     r4(tr.exit),
     (RESULT[tr.why] ?? [tr.why])[0],

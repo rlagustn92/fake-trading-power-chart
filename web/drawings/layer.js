@@ -30,6 +30,16 @@ const MCTX = document.createElement("canvas").getContext("2d"); // 글자 폭 �
 const START_COLOR = { trend: "#5ec8d8", info: "#e8eaed", hline: "#ffb020", hray: "#ffb020", triangle: "#b18cff", fib: "#a0a6ae", avwap: "#ff6fae", brush: "#ffb020", text: "#e8eaed" };
 // 그리기 색 16가지 + 🎨 직접 고르기 (0.13.0, 사용자: "색상도 더 다양하게")
 export const DRAW_COLORS = ["#e8eaed", "#ffb020", "#ff4d4f", "#3d8bff", "#4cd5a0", "#b18cff", "#5ec8d8", "#ff6fae", "#f5c542", "#ff8a3d", "#9ad04a", "#00c853", "#26a69a", "#7c4dff", "#a1887f", "#ffffff"];
+
+/**
+ * 브러시 색·두께 (0.16.0, 사용자: "브러시 색깔이랑 두께 설정 못 함?"): 브러시를 켜면 그리기 막대에서 고르고, 고른 것을 기억한다 (cfg.chart.brush).
+ * 전에는 늘 주황 2px로 그려지고, 다 그린 뒤 브러시를 끄고 선을 눌러야만 바꿀 수 있었다. 두께는 1~5px (다른 그림은 1~3px)
+ */
+export const BRUSH_WIDTHS = [1, 2, 3, 4, 5];
+export function brushStyle(cfg) {
+  const b = cfg?.chart?.brush ?? {};
+  return { color: /^#[0-9a-f]{6}$/i.test(b.color ?? "") ? b.color : START_COLOR.brush, width: BRUSH_WIDTHS.includes(b.width) ? b.width : 2 };
+}
 const FIB = [
   [0, "#a0a6ae"],
   [0.236, "#ff4d4f"],
@@ -347,7 +357,8 @@ export function createDrawings(o) {
     }
     if (draft) {
       const pts = [...draft.pts, draft.hover].filter(Boolean);
-      const s = shapeOf({ id: "draft", type: draft.type, pts, color: START_COLOR[draft.type], width: 2, extR: draft.type === "fib" }, m, ax);
+      const st = draft.type === "brush" ? brushStyle(cfg) : { color: START_COLOR[draft.type], width: 2 }; // 그리는 동안에도 고른 브러시 색·두께로
+      const s = shapeOf({ id: "draft", type: draft.type, pts, color: st.color, width: st.width, extR: draft.type === "fib" }, m, ax);
       if (s) shapes.push({ dw: { id: "draft" }, s, draft: true });
     }
     axisLabels = shapes.flatMap(({ s }) => s.axis).filter((a) => a.y != null).map(axisView);
@@ -669,7 +680,8 @@ export function createDrawings(o) {
     lockChart(false);
     const need = d?.type === "brush" ? 2 : TOOLS[d?.type]?.n;
     if (!d || d.pts.length < need) return;
-    const dw = { id: newId(), type: d.type, pts: d.type === "brush" ? d.pts : d.pts.slice(0, TOOLS[d.type].n), color: START_COLOR[d.type], width: d.type === "hline" || d.type === "hray" ? 1 : 2, extL: false, extR: d.type === "fib", locked: false };
+    const st = d.type === "brush" ? brushStyle(cfg) : { color: START_COLOR[d.type], width: d.type === "hline" || d.type === "hray" ? 1 : 2 };
+    const dw = { id: newId(), type: d.type, pts: d.type === "brush" ? d.pts : d.pts.slice(0, TOOLS[d.type].n), color: st.color, width: st.width, extL: false, extR: d.type === "fib", locked: false };
     // 계속 그리기면 도구를 그대로 두고 바로 다음 것을 그린다 (선택 막대도 안 띄움)
     if (cfg.chart.keep_draw_tool ?? true) selId = null;
     else {
@@ -728,7 +740,7 @@ export function createDrawings(o) {
       h("span.dw-colors", DRAW_COLORS.map((c) => h(`button.swatch${dw.color === c ? ".on" : ""}`, { style: `background:${c}`, onclick: () => update(dw.id, { color: c }) })), colorPick(dw.color, (c) => update(dw.id, { color: c }))),
       dw.type === "text"
         ? [[1, "작게"], [2, "보통"], [3, "크게"]].map(([w, l]) => b(l, (dw.width ?? 2) === w, () => update(dw.id, { width: w }), "글자 크기"))
-        : [1, 2, 3].map((w) => b(`${w}px`, (dw.width ?? 2) === w, () => update(dw.id, { width: w }), "두께")),
+        : (dw.type === "brush" ? BRUSH_WIDTHS : [1, 2, 3]).map((w) => b(`${w}px`, (dw.width ?? 2) === w, () => update(dw.id, { width: w }), "두께")),
       dw.type === "text" ? b("✎ 고치기", false, () => writeText(null, dw), "글자 고치기") : null,
       lineLike ? b("← 연장", dw.extL, () => update(dw.id, { extL: !dw.extL }), "왼쪽으로 화면 끝까지 늘리기") : null,
       lineLike || dw.type === "fib" ? b("연장 →", dw.extR, () => update(dw.id, { extR: !dw.extR }), "오른쪽으로 화면 끝까지 늘리기") : null,

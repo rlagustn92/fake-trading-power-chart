@@ -232,16 +232,23 @@ export async function createTrading(root, { cfg, grid, replay, toast, onToggle, 
     s.endT = now;
     const prev = s.snap;
     s.snap = { t: b.t, tf: c.tf, h: b.h, l: b.l, c: b.c };
-    if (b.c !== s.price) s.movedAt = Date.now();
+    const quiet = Date.now() - (s.movedAt ?? Date.now()); // 마지막으로 가격이 움직인 뒤 지난 시간 (장이 닫혀 있었나)
+    const moved = b.c !== s.price;
+    if (moved) s.movedAt = Date.now();
     s.price = b.c;
     // 처음·봉을 바꿨을 때·봉이 다시 읽혔을 때는 기준만 잡는다 (그 전 움직임으로 체결하지 않게)
     if (!prev || prev.tf !== c.tf || b.t < prev.t) return paint();
-    let hi = Math.max(prev.c, b.c);
-    let lo = Math.min(prev.c, b.c);
+    // 30분 넘게 멈춰 있다가 새 봉으로 움직였다 = 장이 다시 열렸다 (미국 주식 9:30 등, 0.16.0 갭 체결).
+    // 어제 종가와 오늘 시가 사이는 거래가 없었으니 그 사이 선은 안 지나간 것 → 새 봉들의 움직임만, 시가는 첫 새 봉의 시가
+    const fresh = bars.filter((x) => x.t > prev.t);
+    const brk = moved && quiet > HOLE * 1000 && fresh.length > 0;
+    let hi = brk ? b.c : Math.max(prev.c, b.c);
+    let lo = brk ? b.c : Math.min(prev.c, b.c);
     for (let i = bars.length - 1; i >= 0 && bars[i].t >= prev.t; i--) {
       const x = bars[i];
       // 지난번에 보던 봉은 그때보다 더 높아지거나 낮아진 것만, 그 뒤에 생긴 봉은 전부 지난 확인 뒤의 움직임
       if (x.t === prev.t) {
+        if (brk) continue;
         if (x.h > prev.h) hi = Math.max(hi, x.h);
         if (x.l < prev.l) lo = Math.min(lo, x.l);
       } else {
@@ -249,7 +256,7 @@ export async function createTrading(root, { cfg, grid, replay, toast, onToggle, 
         lo = Math.min(lo, x.l);
       }
     }
-    if (pos || pend) judge({ t: b.t, o: prev.c, h: hi, l: lo, c: b.c }, now);
+    if (pos || pend) judge(brk ? { t: b.t, o: fresh[0].o, h: hi, l: lo, c: b.c, brk: true } : { t: b.t, o: prev.c, h: hi, l: lo, c: b.c }, now);
     // 들고 있는 동안은 5초마다 계좌 파일에도 적어 둔다 (앱을 꺼도 기록이 사라지지 않게 → 다음에 켤 때 정리)
     if (pos && Date.now() - s.savedAt > 5000) {
       s.savedAt = Date.now();
@@ -366,17 +373,27 @@ export async function createTrading(root, { cfg, grid, replay, toast, onToggle, 
     const s = ses;
     const out = [];
     if (s.m1) {
-      while (s.i < s.m1.length && s.m1[s.i].t + 60 <= endT) out.push(s.m1[s.i++]);
+      while (s.i < s.m1.length && s.m1[s.i].t + 60 <= endT) out.push(markBreak(s.m1, s.i++, 60, s.info));
       // 빈 곳 안에 들어와 있거나(봉 단위로 지나온 경우), 바로 앞이 빈 곳(리플레이 칸이 받는 동안 제자리)이면 받아서 다시 읽는다
       const inside = s.i > 0 && endT - (s.m1[s.i - 1].t + 60) > HOLE;
       const ahead = s.i > 0 && s.i < s.m1.length && s.m1[s.i].t - endT > HOLE;
       if (s.info.kind === "perp" && (inside || ahead)) fillHole(s);
       else moreM1(s);
     } else {
-      for (const b of s.cell.bars) if (b.t > s.lastBarT) out.push(b);
+      const list = s.cell.bars;
+      const sec = TF_SEC[s.cell.tf] ?? DAY;
+      for (let k = 0; k < list.length; k++) if (list[k].t > s.lastBarT) out.push(markBreak(list, k, sec, s.info));
       if (out.length) s.lastBarT = out[out.length - 1].t;
     }
     return out;
+  }
+
+  /**
+   * 체결 판단에 넘길 봉 + brk(거래가 끊겼다 다시 시작된 첫 봉, E.isBreak) — 0.16.0 갭 체결, 사용자 결정:
+   * 장중 갭이면 익절·지정가는 선 가격, 이런 봉만 시가로. 저장된 봉은 건드리지 않고 복사해서 표시만 붙인다
+   */
+  function markBreak(list, k, sec, info) {
+    return { ...list[k], brk: E.isBreak(list[k - 1], list[k], sec, info.kind === "perp") };
   }
 
   // ── 매매 ──

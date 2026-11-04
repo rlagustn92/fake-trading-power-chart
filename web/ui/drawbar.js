@@ -1,6 +1,6 @@
 // ✏️ 그리기 도구 막대 (SPEC §3.4): 아이콘 아래 원래 이름, 마우스를 올리면 쉬운 설명(§0.2-4)
-import { h } from "./dom.js";
-import { TOOLS } from "../drawings/layer.js";
+import { h, colorPick } from "./dom.js";
+import { TOOLS, DRAW_COLORS, BRUSH_WIDTHS, brushStyle } from "../drawings/layer.js";
 import { confirmBox } from "./dialog.js";
 
 const HOW = {
@@ -11,7 +11,7 @@ const HOW = {
   triangle: "고점 → 저점 → 고점 → 저점 순서로 4번 찍으세요",
   fib: "고점(또는 저점)에서 반대쪽 끝까지 두 점을 찍으세요",
   avwap: "평균을 시작할 봉 하나를 찍으세요 (예: 급락 바닥, 실적 발표일)",
-  brush: "마우스를 누른 채로 자유롭게 그리세요 (손을 떼면 끝 · 이 도구만 끌면 그려져요)",
+  brush: "마우스를 누른 채로 자유롭게 그리세요 (손을 떼면 끝 · 이 도구만 끌면 그려져요) · 색·두께는 옆에서",
   text: "글자를 쓸 곳을 누르세요",
 };
 
@@ -48,7 +48,24 @@ export function createDrawbar(root, { cfg, grid, onToggle }) {
   const clear = h("button.dw-tool", { "data-tip-text": "이 종목에 그린 것 모두 지우기", onclick: () => clearAll() }, h("span.dw-ico", "🗑"), h("span.dw-name", "모두 지우기"));
   const hint = h("span.dw-hint");
   const close = h("button.dw-tool", { onclick: () => toggle(false), "data-tip-text": "도구 막대 닫기" }, h("span.dw-ico", "✕"), h("span.dw-name", "닫기"));
-  root.replaceChildren(...Object.values(btns), h("div.tb-sep"), magnet, keep, auto, h("div.tb-sep"), clear, hint, h("div.grow"), close);
+  // 브러시를 켜면 보이는 색·두께 (0.16.0). 고른 것은 cfg.chart.brush에 남아 다음에도 그대로 (이미 그린 선은 안 바뀐다)
+  const brushBox = h("span.dw-brush", { hidden: true });
+  root.replaceChildren(...Object.values(btns), brushBox, h("div.tb-sep"), magnet, keep, auto, h("div.tb-sep"), clear, hint, h("div.grow"), close);
+
+  function paintBrush(on) {
+    brushBox.hidden = !on;
+    if (!on) return;
+    const st = brushStyle(cfg);
+    const set = (patch) => {
+      cfg.chart.brush = { ...st, ...patch };
+      cfg.save();
+      paint();
+    };
+    brushBox.replaceChildren(
+      h("span.dw-colors", { "data-tip-text": "브러시 색 (지금부터 그리는 선)" }, DRAW_COLORS.map((c) => h(`button.swatch${st.color === c ? ".on" : ""}`, { style: `background:${c}`, onclick: () => set({ color: c }), "aria-label": c })), colorPick(st.color, (c) => set({ color: c }))),
+      ...BRUSH_WIDTHS.map((w) => h(`button.dw-w${st.width === w ? ".on" : ""}`, { onclick: () => set({ width: w }), "data-tip-text": `브러시 두께 ${w}px` }, h("span.dw-w-line", { style: `height:${w}px;background:${st.color}` }), h("span.dw-w-num", `${w}`)))
+    );
+  }
 
   function pick(k) {
     const c = grid.current;
@@ -78,6 +95,7 @@ export function createDrawbar(root, { cfg, grid, onToggle }) {
     const c = grid.current;
     const t = c?.drawings.tool;
     for (const [k, b] of Object.entries(btns)) b.classList.toggle("on", t === k);
+    paintBrush(t === "brush");
     magnet.classList.toggle("on", cfg.chart.magnet ?? true);
     keep.classList.toggle("on", cfg.chart.keep_draw_tool ?? true);
     auto.classList.toggle("on", !!c?.insts.some((x) => x.id === "triangle_auto"));

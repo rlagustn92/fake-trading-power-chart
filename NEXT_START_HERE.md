@@ -1,6 +1,6 @@
 # 다음 작업 시작점 (다른 PC·다른 AI용 인수인계)
 
-작성일 **2026-11-03** (0.15.0까지 반영). **이 파일을 읽는 AI는 오늘 날짜부터 확인하고, 이 파일의 날짜와 비교한다.**
+작성일 **2026-11-04** (0.16.0까지 반영). **이 파일을 읽는 AI는 오늘 날짜부터 확인하고, 이 파일의 날짜와 비교한다.**
 
 > **2026-11-03부터 소스는 GitHub 공개 저장소 https://github.com/rlagustn92/fake-trading-power-chart** (원조 POWER CHART AND BACKTEST와 같은 방식). 바뀐 기록은 git 기록과 이 폴더의 글(아래 순서)에 남는다. AI가 쓰던 메모(대화 기억)는 PC 안 다른 곳에 있어서 같이 가지 않는다 → 필요한 것은 전부 여기 글에 적어 둔다.
 
@@ -19,8 +19,11 @@
 - 실전 주문은 나중에 별도 프로그램 `REAL TRADING POWER CHART`. 지금은 만들지 않는다.
 - 리플레이 데이터: **Binance 주식 무기한선물 1분봉** (사용자 결정 2026-10-30). Hyperliquid는 3.5일뿐이라 보조. 국내 주식은 토스 1분봉(약 4년, 0.7.0).
 
-## 지금 상태 (2026-11-03, 버전 0.15.0, 시험 113개 + Rust 13개 통과)
-- **2026-11-03 새로 받은 저장소(git clone)로 이어 받음**: 인계 글을 순서대로 읽고, 커밋 작성자를 저장소 설정으로 넣고, 시험 113개 모두 맞음을 확인. 코드는 안 고쳤다. Rust 시험(13개)은 이번에 안 돌림 (Rust를 안 고쳐서)
+## 지금 상태 (2026-11-04, 버전 0.16.0, 시험 129개 + Rust 13개 통과)
+- **0.16.0은 2026-11-04 사용자 "올려줘"로 main에 올렸다** (GitHub가 EXE를 만들어 Releases v0.16.0 → 사용자 앱의 🆕 알림). 사용자가 EXE로 받아 미국·국내 주식 화면을 확인하는 것이 남았다
+- **0.16.0 마무리 (같은 날, 사용자: "모의매매로 연습해서 실제 계좌로 나가야 돼 · 걸작으로")**: 원래 있던 "기준 봉" 버그 2개(리플레이 뒤 옛 값에 멈춤 · 정각 한 칸 늦음)와 분할 리플레이 미래 봉 버그를 고치고, 멀티 이평 "선 때문에 화면 안 늘림"(기본 켬), 지표 창 스크롤 유지. 모의매매를 1분봉 원본으로 독립 검산해서 모두 맞음. 실제 거래소와 다른 점 5가지 중 (가) 갭 체결은 고쳤다 (장중 = 선 가격, 끊긴 뒤 첫 봉 = 시가). 나머지 (나)~(마)는 STATUS.md "아직 확인 못 한 것 7" — 사용자가 아직 안 정함 (체결 규칙이라 먼저 설명하고 정한 다음 고친다)
+- **0.16.0 (2026-11-04): 🧭 멀티 이평.** 사용자 아이디어("5분봉에서 1시간·4시간·일봉 이평을 한 번에"). 지표 `mtfma` (`web/indicators/index.js`의 `MTF_ROWS`·`makeMtfMa`·`maOrder`·`distPct`), 계산은 예전부터 있던 "기준 봉"(`mapHtf`, `ctx.htf`)을 그대로 쓴다. 기준 봉 비교는 `tfMode` 하나로 (same·htf·lower), lower면 숨긴다. 범례 줄바꿈 `br`·색 글자 `more`는 `ui/cell.js` paintLegend, 설정 칸 묶음 `group`·`noColor`는 `ui/indpanel.js`. 사용자가 가장 중요하게 본 것: **"버그 없이, 유지보수 필요 없이 안정적으로"**
+- **2026-11-03 (다른 PC) 새로 받은 저장소(git clone)로 이어 받음**: 인계 글을 순서대로 읽고, 커밋 작성자를 저장소 설정으로 넣고, 시험 113개 모두 맞음을 확인. 코드는 안 고쳤다. Rust 시험(13개)은 이번에 안 돌림 (Rust를 안 고쳐서)
   - 새로 받은 저장소에서는 http://localhost:5280/ 을 열어도 **TQQQ·SQQQ(야후) 일봉이 안 받아진다** (이 복제본 관심종목의 TQQQ는 바이낸스 `bn:TQQQUSDT`, SQQQ는 없음) → 백테스트 시험 2개가 "데이터가 없어요"로 틀린다. 아래 "새로 받은 저장소에서 시험 돌리기"대로 받고 다시
 - **0.15.0 (2026-11-03): 소스를 GitHub로 + 🆕 새 버전 받기.** 원조 1.4.0의 것을 그대로 옮기고 이름만 맞췄다 (`.github/workflows/build.yml`, `src-tauri/src/update.rs`, `web/ui/update.js`). 모의매매·차트·리플레이는 건드리지 않았다 (사용자: "기능적으로는 건들지마"). 이제 버전을 올려 main에 올리면 GitHub가 EXE를 만들어 Releases에 올리고, 사용자 앱이 켤 때·12시간마다 알아서 받는다
 - 프로그램: `release\FAKE TRADING POWER CHART.exe` + 바탕화면 바로가기. **예전 버전**: 0.15.0부터는 GitHub Releases에 버전마다 남는다 → `release\`에 버전 이름 복사본은 더 만들지 않는다 (사용자 결정 2026-11-03). 그 전 것 `release\FAKE TRADING POWER CHART 0.12.1.exe`, `… 0.13.0.exe`, `… 0.14.0.exe`, `… 0.14.1.exe`는 GitHub에 없어서 그대로 둔다. 바로가기는 늘 이름 없는 최신 EXE. 사용자는 EXE로 쓰고 있다 (개발 서버 데이터는 EXE로 옮기지 않았다)
@@ -83,7 +86,7 @@
    const { loadConfig } = await import('/config.js'); const { createData } = await import('/core/data.js'); const { describe } = await import('/core/symbols.js');
    const data = createData(await loadConfig()); for (const s of ['TQQQ', 'SQQQ']) await data.ensure(describe(s), '1D', { force: true });
    ```
-4. http://localhost:5280/tests/test.html → "✔ 모두 맞음 (113개)"
+4. http://localhost:5280/tests/test.html → "✔ 모두 맞음 (129개, 0.16.0 기준)"
 
 ## 새 PC로 옮길 때
 - **코드·문서**: GitHub에서 받기 (`git clone https://github.com/rlagustn92/fake-trading-power-chart`). 프로그램만 쓸 거면 Releases의 `FAKE-TRADING-POWER-CHART.exe` 하나면 된다.

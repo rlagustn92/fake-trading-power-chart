@@ -2,7 +2,10 @@
 // 시험: tests/tests.js "모의매매 체결 규칙"
 // - 한 봉 안에서 익절·손절이 둘 다 닿으면 순서를 모르므로 손절 먼저 (보수적)
 // - 지정가 익절은 닿기만 해서는 안 되고 한 틱 넘게 지나가야 체결
-// - 시가가 선을 건너뛰면(갭) 선 가격이 아니라 시가로
+// - 시가가 선을 건너뛰면(갭): 손절·청산·돌파(시장가)는 시가로 (불리하게).
+//   익절·지정가 대기선(미리 걸어 둔 지정가)은 장중이면 선 가격 그대로 — 거래가 이어지는 동안엔 가격이 선을 지나는 순간
+//   걸어 둔 주문이 먼저 체결되니 선보다 좋은 값은 없다. 거래가 끊겼다 다시 시작된 첫 봉(b.brk: 미국 주식 9:30 장 시작·주말 뒤)만 시가로
+//   (0.16.0 사용자 결정 "고쳐줘". 전에는 장중에도 늘 시가라 조금 유리하게 계산됐다)
 // - 시장가(진입·손절·청산·직접 종료)는 슬리피지 + 시장가 수수료, 익절(지정가)은 지정가 수수료
 // - 레버리지·청산 (DATA_RESEARCH §2-6, Hyperliquid 격리 마진): 증거금 × 배율 = 포지션 크기,
 //   유지증거금 = 최대 레버리지 초기증거금의 절반 (최대 20배 → 2.5%). 증거금이 유지증거금까지 줄면 강제 청산
@@ -100,14 +103,14 @@ export function liqPrice(p, r) {
 export const pendingType = (side, price, cur) => ((side > 0) === (price < cur) ? "limit" : "stop");
 
 /**
- * 대기 주문이 이 봉에서 체결되나 → {price, maker} | null
- * - 지정가: 한 틱 넘게 지나가야 (익절과 같은 규칙), 시가가 건너뛰면 그 시가로 (더 좋은 값). 지정가 수수료
+ * 대기 주문이 이 봉에서 체결되나 → {price, maker} | null.  b.brk = 거래가 끊겼다 다시 시작된 첫 봉
+ * - 지정가: 한 틱 넘게 지나가야 (익절과 같은 규칙). 시가가 건너뛰면 장중엔 그 지정가, 장 시작 첫 봉(b.brk)만 시가 (더 좋은 값). 지정가 수수료
  * - 돌파(스톱): 닿으면 시장가 → 미끄러짐 + 시장가 수수료, 시가가 건너뛰면 시가로
  */
 export function fillPending(o, b, r) {
   const long = o.side > 0;
   if (o.type === "limit") {
-    if (long ? b.o < o.price : b.o > o.price) return { price: b.o, maker: true };
+    if (long ? b.o < o.price : b.o > o.price) return { price: b.brk ? b.o : o.price, maker: true };
     if (long ? b.l < o.price : b.h > o.price) return { price: o.price, maker: true };
     return null;
   }
@@ -123,7 +126,15 @@ export function fillPending(o, b, r) {
  */
 export const sizeForRisk = (risk, dist, r) => (dist > 0 ? risk / (dist + r.slip + 2 * r.taker) : 0);
 
-/** 이 봉에서 익절·손절·청산이 걸리는지 → {price, why} | null. bar = {o,h,l,c} */
+/**
+ * 거래가 끊겼다 다시 시작된 첫 봉인가 (0.16.0 갭 체결) → b.brk로 넘긴다.
+ * 바로 앞 봉(sec초짜리)이 끝난 뒤 30분 넘게 비었거나(미국 주식 9:30 장 시작·주말·데이터 빈 곳),
+ * 장이 쉬는 종목(perp=false: 주식 등)의 일·주봉(밤사이 쉼). 앞 봉을 모르면 끊긴 것으로 (예전처럼 시가)
+ */
+export const BREAK_SEC = 30 * 60;
+export const isBreak = (prev, b, sec, perp) => !prev || b.t - (prev.t + sec) > BREAK_SEC || (sec >= 86400 && !perp);
+
+/** 이 봉에서 익절·손절·청산이 걸리는지 → {price, why} | null. bar = {o,h,l,c, brk(거래가 끊겼다 다시 시작된 첫 봉)} */
 export function exitOnBar(p, b, r) {
   const long = p.side > 0;
   const stop = (price) => price * (1 - p.side * r.slip); // 손절·청산은 시장가 → 불리하게 밀린다
@@ -135,7 +146,7 @@ export function exitOnBar(p, b, r) {
     badWhy = "liq";
   }
   if (bad != null && (long ? b.o <= bad : b.o >= bad)) return { price: stop(b.o), why: badWhy };
-  if (p.tp != null && (long ? b.o > p.tp : b.o < p.tp)) return { price: b.o, why: "tp" };
+  if (p.tp != null && (long ? b.o > p.tp : b.o < p.tp)) return { price: b.brk ? b.o : p.tp, why: "tp" }; // 장중 갭은 익절가 그대로, 장 시작 첫 봉만 시가
   if (bad != null && (long ? b.l <= bad : b.h >= bad)) return { price: stop(bad), why: badWhy };
   if (p.tp != null && (long ? b.h > p.tp : b.l < p.tp)) return { price: p.tp, why: "tp" };
   return null;
@@ -189,7 +200,7 @@ export function record(p, { why, t, sym }) {
   return {
     sym,
     side: p.side,
-    qty,
+    qty: q3(qty), // 일부 정리 수량을 더하면 0.10200000000000001처럼 찌꺼기가 남는다 (0.16.0) → 수량 단위(0.001)로
     entry: p.entry,
     exit: qty ? p.exitValue / qty : p.entry, // 나간 가격 평균
     t0: p.t,

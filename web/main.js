@@ -250,7 +250,9 @@ const grid = createGrid($("#grid"), {
       toast(`🔔 알림을 만들었어요 · ${alertText(al)}`, 6000);
     };
     const items = [];
-    if (IND_NAME[inst.id]) {
+    // 기준 봉이 차트보다 작으면 그 선은 숨겨져 있다 (0.16.0) → 알림도 만들지 않는다
+    const lowerTf = !!inst.params?.tf && TF_SEC[inst.params.tf] < TF_SEC[cell.tf];
+    if (IND_NAME[inst.id] && !lowerTf) {
       const htf = inst.params.tf && inst.params.tf !== cell.tf ? inst.params.tf : undefined;
       const src = inst.params.src && inst.params.src !== "c" ? inst.params.src : null; // 소스가 고가·저가…면 알림도 그 선으로 (0.14.0)
       const ind = { id: inst.id, params: { length: inst.params.length, ...(src ? { src } : {}), ...(htf ? { tf: htf } : {}) } };
@@ -259,7 +261,7 @@ const grid = createGrid($("#grid"), {
       items.push({ label: `🔔 가격이 ${name} 위로 뚫으면 알림`, onclick: () => add({ kind: "ind", op: "up", ind }) });
       items.push({ label: `🔔 가격이 ${name} 아래로 뚫으면 알림`, onclick: () => add({ kind: "ind", op: "down", ind }) });
     }
-    if (inst.id === "bb" || inst.id === "vwbb") {
+    if ((inst.id === "bb" || inst.id === "vwbb") && !lowerTf) {
       // 위 밴드를 뚫고 올라가면 / 아래 밴드를 깨고 내려가면 (가운데 굵은 띠 = 배수 σ)
       const htf = inst.params.tf && inst.params.tf !== cell.tf ? inst.params.tf : undefined;
       const params = { length: inst.params.length, mult: inst.params.mult, ...(inst.params.tvLower ? { tvLower: true } : {}), ...(htf ? { tf: htf } : {}) };

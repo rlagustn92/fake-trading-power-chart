@@ -92,7 +92,7 @@ export function createPicker(root, { onPick, onAdd, isWatched, onTf = null, perp
     const d = describe(it.id);
     const watched = isWatched(it.id);
     if (it.perpFor) return perpRow(it, i, watched);
-    if (it.tf) return h(`div.pick-row.pick-tf${i === cursor ? ".cur" : ""}`, { onclick: () => choose(it), onpointerenter: () => setCursor(i) }, h("div.pick-main", h("span.pick-label", `⏱ ${TF_LABEL[it.tf]}봉으로 바꾸기`), h("span.pick-sub", "Enter · 종목을 찾으려면 이어서 치세요 (예: 247540)")));
+    if (it.tf) return h(`div.pick-row.pick-tf${i === cursor ? ".cur" : ""}`, { onclick: () => choose(it), onpointermove: (e) => hoverRow(e, i) }, h("div.pick-main", h("span.pick-label", `⏱ ${TF_LABEL[it.tf]}봉으로 바꾸기`), h("span.pick-sub", "Enter · 종목을 찾으려면 이어서 치세요 (예: 247540)")));
     const src = d.kind === "perp" ? PERP_SRC[d.daily] : null;
     const sub = [it.direct ? "직접 입력" : null, it.code && it.code !== d.label && !it.code.startsWith("^") ? it.code : null, it.market && !it.builtin && KIND[d.kind] !== it.market ? it.market : null, src, KIND[d.kind], it.type && !["us", "kr", "index", "fx", "perp", "sentiment", "future", "yield"].includes(it.type) ? it.type : null]
       .filter(Boolean)
@@ -100,7 +100,7 @@ export function createPicker(root, { onPick, onAdd, isWatched, onTf = null, perp
     const title = d.kind === "kr" ? it.name ?? d.label : `${d.label}${it.desc || d.sub || (it.name && it.name !== d.label) ? `  ${it.desc ?? d.sub ?? it.name}` : ""}`;
     return h(
       `div.pick-row${i === cursor ? ".cur" : ""}`,
-      { onclick: () => choose(it), onpointerenter: () => setCursor(i), "data-tip-text": it.id.startsWith("^") ? `지수예요 (Yahoo 코드 ${it.id})\n지수는 사고팔 수 없고, 시장 전체의 흐름을 보는 숫자예요` : src ? `${src} 무기한선물: 24시간, 실시간으로 움직여요` : "" },
+      { onclick: () => choose(it), onpointermove: (e) => hoverRow(e, i), "data-tip-text": it.id.startsWith("^") ? `지수예요 (Yahoo 코드 ${it.id})\n지수는 사고팔 수 없고, 시장 전체의 흐름을 보는 숫자예요` : src ? `${src} 무기한선물: 24시간, 실시간으로 움직여요` : "" },
       h("div.pick-main", h("span.pick-label", title), h("span.pick-sub", sub)),
       addBtn(it, watched)
     );
@@ -130,7 +130,7 @@ export function createPicker(root, { onPick, onAdd, isWatched, onTf = null, perp
       `div.pick-row.pick-perp${i === cursor ? ".cur" : ""}`,
       {
         onclick: () => choose(it),
-        onpointerenter: () => setCursor(i),
+        onpointermove: (e) => hoverRow(e, i),
         "data-tip-text": `${src} 무기한선물 (24시간, 실시간으로 움직여요)\n주식이 아니라 같은 값을 따라가는 상품이라 값이 조금 다를 수 있어요${it.usd ? "\n가격은 달러예요" : ""}`,
       },
       h("div.pick-main", h("span.pick-label", `↳ ${base.label} 24시간 실시간`), h("span.pick-sub", `${src} 무기한선물${it.usd ? " · 달러 가격" : ""}`)),
@@ -157,6 +157,18 @@ export function createPicker(root, { onPick, onAdd, isWatched, onTf = null, perp
     list.replaceChildren(...(perpTab && items.length ? [h("p.hint", `${items.length}개 · 위에서 이름을 치면 바로 찾아요`)] : []), ...items.slice(0, perpTab ? 1200 : 40).map(row));
     if (!items.length) list.append(h("p.hint", input.value.trim() ? "이 탭에는 찾는 종목이 없어요 · '전체' 탭도 봐 주세요" : "받는 중…"));
     list.querySelector(".cur")?.scrollIntoView({ block: "nearest" });
+  }
+
+  /**
+   * 마우스를 진짜로 움직였을 때만 그 줄을 고른다 (0.16.0). 전에는 pointerenter라서, 마우스가 목록 위에 가만히 있으면
+   * 글자를 칠 때마다 바뀐 목록의 "마우스 아래 줄"이 골라져 Enter가 엉뚱한 종목을 열었다 (QQQ 치고 Enter → QQQB).
+   * 창을 연 뒤 처음 본 위치는 기억만 하고, 위치가 달라진 다음부터 고른다 (목록이 바뀔 때 브라우저가 보내는 가짜 움직임은 위치가 같다)
+   */
+  let lastPt = null;
+  function hoverRow(e, i) {
+    const moved = !!lastPt && (e.screenX !== lastPt[0] || e.screenY !== lastPt[1]);
+    lastPt = [e.screenX, e.screenY];
+    if (moved) setCursor(i);
   }
 
   function setCursor(i) {
@@ -251,6 +263,7 @@ export function createPicker(root, { onPick, onAdd, isWatched, onTf = null, perp
 
   function open(text = "") {
     root.hidden = false;
+    lastPt = null; // 열 때 마우스가 목록 위에 있어도 저절로 고르지 않게
     cat = "all";
     paintTabs();
     input.value = text;
