@@ -729,11 +729,22 @@ export function createDrawings(o) {
     redraw();
   }
 
+  // 막대 접기 (0.19.0, 사용자: "저거 땜시 멀리 있는 차트 보는 데 방해 · 최소화 버튼"): ✏ 버튼만 남긴다. 접은 채로 기억 → 선을 누를 때마다 다시 접지 않게
+  // 선 끌기·Delete·오른쪽 클릭 메뉴는 막대와 따로라 그대로 된다
+  function setBarMini(on) {
+    cfg.chart.draw_bar_mini = on;
+    cfg.save();
+    paintBar();
+  }
+
   function paintBar() {
     const dw = list().find((x) => x.id === selId);
     bar.hidden = !dw;
     if (!dw) return;
     const b = (label, on, onclick, tip) => h(`button${on ? ".on" : ""}`, { onclick, "data-tip-text": tip }, label);
+    const mini = !!cfg.chart.draw_bar_mini;
+    bar.classList.toggle("mini", mini);
+    if (mini) return bar.replaceChildren(b("✏️", false, () => setBarMini(false), "설정 막대 펼치기 (색·두께·연장)"));
     const lineLike = dw.type === "trend" || dw.type === "info";
     const items = [
       h("span.dw-bar-name", { "data-tip": dw.type }, TOOLS[dw.type].name),
@@ -747,6 +758,7 @@ export function createDrawings(o) {
       b(dw.locked ? "🔒" : "🔓", dw.locked, () => update(dw.id, { locked: !dw.locked }), "잠금: 실수로 옮기지 않게"),
       ALERTABLE.has(dw.type) ? b("🔔", false, () => o.onAlert?.(dw), "알림 만들기\n가격(종가)이 이 선을 넘으면 알려줘요") : null,
       b("🗑", false, () => remove(dw.id), "지우기 (Delete)"),
+      b("—", false, () => setBarMini(true), "막대 접기: 작은 ✏️ 버튼만 남겨요\n선 끌기·지우기는 그대로 돼요"),
       b("✕", false, () => select(null), "선택 풀기 (Esc)"),
     ];
     bar.replaceChildren(...items.flat().filter(Boolean));
