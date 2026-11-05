@@ -1429,6 +1429,12 @@ export function createCell(env, cc) {
   });
 
   root.addEventListener("pointerdown", (e) => env.onSelect?.(api, e), true);
+  // 오른쪽 클릭 = 📋 이미지 복사 메뉴 (0.18.0). 익절·손절선·그린 것·범례 줄이 먼저 가져간 클릭은 그쪽 것 그대로
+  root.addEventListener("contextmenu", (e) => {
+    if (e.defaultPrevented) return;
+    e.preventDefault();
+    env.onCellMenu?.(api, e);
+  });
   // 크게 보기는 두 번 모두 이 칸 차트를 눌렀을 때만: 종목 찾기·메뉴 줄을 두 번 누르면 첫 번에 창이 닫히고 두 번째가 차트에 떨어진다
   let downs = [-1e9, -1e9];
   body.addEventListener("pointerdown", (e) => e.button === 0 && (downs = [downs[1], e.timeStamp]), true);
@@ -1841,6 +1847,14 @@ export function createCell(env, cc) {
     },
     async screenshot() {
       return chart.takeScreenshot(true);
+    },
+    /** 📋 복사용 (ui/snapshot.js): 마우스가 있던 봉 값 말고 마지막 봉 기준으로. 십자선은 takeScreenshot이 뺀다 */
+    snapshot() {
+      chart.clearCrosshairPosition();
+      crossIdx = null;
+      paintHoverPrices();
+      paintLegend();
+      return { root, chart: chart.chartElement(), shot: chart.takeScreenshot(true) };
     },
     destroy() {
       token++;

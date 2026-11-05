@@ -2,6 +2,7 @@
 import { createCell } from "./cell.js";
 import { preferLive } from "../core/symbols.js";
 import { h } from "./dom.js";
+import { composeCells } from "./snapshot.js";
 
 export const SPLITS = {
   1: [1, 1],
@@ -29,6 +30,7 @@ export function createGrid(box, env) {
 
   const layout = () => cfg.grid.layouts[cfg.grid.current] ?? Object.values(cfg.grid.layouts)[0];
   const sync = () => ({ ...cfg.grid.sync, ...(layout().sync ?? {}) });
+  const shownCells = () => cells.filter((c) => c.root.offsetWidth);
 
   function cellEnv() {
     return {
@@ -376,6 +378,12 @@ export function createGrid(box, env) {
         g.fillText(`${c.info.label} ${c.root.querySelector(".ch-price").textContent} ${c.root.querySelector(".ch-chg").textContent}`, (hr.left - rect.left + 6) * dpr, (hr.top - rect.top + hr.height * 0.72) * dpr);
       }
       return out;
+    },
+    /** 보이는 칸 (크게 보기 중이면 그 칸 하나) */
+    shownCells,
+    /** 📋 복사용 한 장 (0.18.0): 이 칸만, 또는 보이는 칸 모두를 화면 배치 그대로 */
+    snapshot(cell) {
+      return composeCells((cell ? [cell] : shownCells()).map((c) => c.snapshot()));
     },
   };
 }

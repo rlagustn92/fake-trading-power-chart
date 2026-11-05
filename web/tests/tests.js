@@ -560,10 +560,49 @@ section("모의매매 체결 규칙 (기획서 §6·§12)");
   check("토스 깊이 찾기: 400일 전부터 → 2일 안으로 · 하나도 없음 → null · 10년 다 → beyond", [Math.abs(dp.oldest - (now - 400 * D)) <= 2 * D ? 1 : 0, none.oldest, all.beyond ? 1 : 0, dp.checked.length <= 20 ? 1 : 0], [1, null, 1, 1]);
 }
 
+section("📋 이미지 복사 — 칸을 한 장으로 (0.18.0)");
+{
+  const { composeCells } = await import("../ui/snapshot.js");
+  const mkCell = (left, k) => {
+    const root = document.createElement("div");
+    root.style.cssText = `position:fixed;left:${left}px;top:0;width:100px;height:60px`;
+    root.innerHTML = `<div style="height:20px;color:rgb(255,0,0);font:700 16px sans-serif;overflow:hidden">■■■<button style="background:rgb(0,0,255);width:30px;height:20px;border:0"></button></div><div class="ch" style="position:absolute;left:0;top:20px;width:100px;height:40px"></div><div style="display:none;position:absolute;left:60px;top:0;width:40px;height:20px;background:rgb(255,255,0)"></div>`;
+    document.body.append(root);
+    const shot = document.createElement("canvas");
+    shot.width = 100 * k;
+    shot.height = 40 * k;
+    const g = shot.getContext("2d");
+    g.fillStyle = "rgb(0,128,0)";
+    g.fillRect(0, 0, shot.width, shot.height);
+    return { root, chart: root.querySelector(".ch"), shot };
+  };
+  const px = (cv, x, y) => [...cv.getContext("2d").getImageData(x, y, 1, 1).data];
+  const count = (cv, x, y, w, want) => {
+    const d = cv.getContext("2d").getImageData(x, y, w, 18).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) if (want(d[i], d[i + 1], d[i + 2])) n++;
+    return n;
+  };
+  const a = mkCell(0, 1);
+  const b = mkCell(104, 1);
+  const two = composeCells([a, b]);
+  check("분할 두 칸: 화면 배치 그대로 204×60", [two.width, two.height], [204, 60]);
+  check("칸 사이는 불투명 어두운 바탕 (흰색이 비치지 않게)", px(two, 102, 30), [11, 13, 16, 255]);
+  check("차트 그림이 두 칸 모두 제자리에", [px(two, 50, 40)[1], px(two, 150, 40)[1]], [128, 128]);
+  check("머리줄 글자가 칸 색 그대로 들어감", count(two, 0, 0, 40, (r, gr, bl) => r > 200 && gr < 60 && bl < 60) > 10 ? 1 : 0, 1);
+  check("버튼·숨긴 것은 그림에 없음 (파랑·노랑 0칸)", count(two, 0, 0, 100, (r, gr, bl) => (bl > 200 && r < 60) || (r > 200 && gr > 200 && bl < 60)), 0);
+  a.root.remove();
+  b.root.remove();
+  const c = mkCell(0, 2);
+  const one = composeCells([c]);
+  check("윈도우 배율 200%: 한 칸 200×120, 차트도 2배로", [one.width, one.height, px(one, 100, 80)[1]], [200, 120, 128]);
+  c.root.remove();
+}
+
 // ── 모든 화면 파일이 문법 오류 없이 읽히는지 (하나라도 깨지면 EXE가 검은 화면에서 멈춘다) ──
 section("파일 읽기 (문법 오류 없는지)");
 {
-  const MODULES = ["alerts/engine", "backtest/engine", "backtest/view", "config", "core/bars", "core/colors", "core/csv", "core/events", "core/daily", "core/data", "core/db", "core/estimate", "core/intraday", "core/limit", "core/series", "core/session", "core/stocklist", "core/symbols", "core/tz", "drawings/geom", "drawings/layer", "drawings/store", "indicators/calc", "indicators/explain", "indicators/index", "indicators/sentiment", "indicators/triangle", "platform", "sources/alpaca", "sources/binance", "sources/hyperliquid", "sources/reconnect", "sources/sentiment", "sources/status", "sources/toss", "sources/yahoo", "trade/engine", "trade/history", "trade/journal", "trade/orderlines", "trade/panel", "ui/alerts", "ui/cell", "ui/dialog", "ui/dom", "ui/drawbar", "ui/format", "ui/goto", "ui/grid", "ui/indpanel", "ui/measure", "ui/menu", "ui/picker", "ui/primitives", "ui/replay", "ui/search", "ui/settings", "ui/sidebar", "ui/statusbar", "ui/tip", "ui/toolbar", "ui/update", "ui/welcome"];
+  const MODULES = ["alerts/engine", "backtest/engine", "backtest/view", "config", "core/bars", "core/colors", "core/csv", "core/events", "core/daily", "core/data", "core/db", "core/estimate", "core/intraday", "core/limit", "core/series", "core/session", "core/stocklist", "core/symbols", "core/tz", "drawings/geom", "drawings/layer", "drawings/store", "indicators/calc", "indicators/explain", "indicators/index", "indicators/sentiment", "indicators/triangle", "platform", "sources/alpaca", "sources/binance", "sources/hyperliquid", "sources/reconnect", "sources/sentiment", "sources/status", "sources/toss", "sources/yahoo", "trade/engine", "trade/history", "trade/journal", "trade/orderlines", "trade/panel", "ui/alerts", "ui/cell", "ui/dialog", "ui/dom", "ui/drawbar", "ui/format", "ui/goto", "ui/grid", "ui/indpanel", "ui/measure", "ui/menu", "ui/picker", "ui/primitives", "ui/replay", "ui/search", "ui/settings", "ui/sidebar", "ui/snapshot", "ui/statusbar", "ui/tip", "ui/toolbar", "ui/update", "ui/welcome"];
   const broken = [];
   for (const m of MODULES) {
     try {

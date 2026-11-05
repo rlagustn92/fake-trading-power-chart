@@ -282,6 +282,16 @@ const grid = createGrid($("#grid"), {
     items.push({ label: "⚙ 이 지표 설정", onclick: () => (grid.select(grid.cells.indexOf(cell)), indpanel.open(inst.uid)) });
     openMenu(null, items, { x: e.clientX, y: e.clientY });
   },
+  onCellMenu: (cell, e) => {
+    const items =
+      grid.shownCells().length > 1
+        ? [
+            { label: "📋 화면 전체 복사", onclick: () => copyImage() },
+            { label: "📋 이 칸만 복사", onclick: () => copyImage(cell) },
+          ]
+        : [{ label: "📋 차트 이미지 복사", onclick: () => copyImage(cell) }];
+    openMenu(null, items, { x: e.clientX, y: e.clientY });
+  },
 });
 
 let pickCb = null; // 백테스트 화면에서 고를 때는 그쪽으로
@@ -507,6 +517,19 @@ async function capture(all) {
     }
   } catch (e) {
     toast(`캡처하지 못했어요 (${e.message ?? e})`);
+  }
+}
+
+/** 📋 오른쪽 클릭 복사 (0.18.0): 파일로 남기지 않고 클립보드에만 → 카톡 등에 바로 붙여 넣기. cell 없으면 보이는 칸 전부 */
+async function copyImage(cell) {
+  try {
+    const canvas = grid.snapshot(cell);
+    const blob = await new Promise((r) => canvas.toBlob(r, "image/png"));
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+    toast("📋 복사했어요 · 카톡 등에 Ctrl+V로 붙여 넣으세요");
+  } catch (e) {
+    logInfo(`[copy] 실패 ${e?.message ?? e}`); // 이유는 영어라 기록에만
+    toast("복사하지 못했어요 · 앱 창을 한 번 누르고 다시 해 보세요");
   }
 }
 

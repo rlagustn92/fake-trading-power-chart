@@ -1080,7 +1080,7 @@ dependencies = [
 
 [[package]]
 name = "fake-trading-power-chart"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "futures-util",
  "hex",
