@@ -1,7 +1,7 @@
 # 작업 현황 — 어디까지 했나 (FAKE TRADING POWER CHART)
 
 **기준일: 2026-11-06 (금요일)** · 이 파일을 고칠 때마다 기준일도 바꾼다.
-**버전 0.19.0** ([CHANGELOG.md](CHANGELOG.md), 2026-11-06 GitHub main에 올림) · 시험 138개 통과 (Rust 13개) · EXE `release\FAKE TRADING POWER CHART.exe` + 바탕화면 바로가기 (2026-10-30, Rust·VS Build Tools·tauri-cli 설치함)
+**버전 0.19.0** ([CHANGELOG.md](CHANGELOG.md), 2026-11-06 GitHub main에 올림 · Releases v0.19.0 빌드 성공 확인) · 시험 138개 통과 (Rust 13개) · EXE `release\FAKE TRADING POWER CHART.exe` + 바탕화면 바로가기 (2026-10-30, Rust·VS Build Tools·tauri-cli 설치함)
 
 같이 볼 것: 사용법 [README.md](README.md) · 기획 [FAKE_TRADING_기획서.md](FAKE_TRADING_기획서.md) · 데이터 조사 [DATA_RESEARCH.md](DATA_RESEARCH.md) · 다음 할 일 [NEXT_START_HERE.md](NEXT_START_HERE.md) · 원본 기획 [SPEC.md](SPEC.md)
 
@@ -144,6 +144,7 @@
 
 
 ## 🙋 정해야 할 것 (사용자에게 물어보기)
+- 📏 자를 켠 채 오른쪽 클릭 (사용자 2026-11-06: "캡처 기능 만드니까 우측 마우스로 잠시 해제되던 게 안 된다"): 개발 서버 확인 결과 Trend Line·Info Line은 그대로(1번 = 그리던 것 취소, 2번 = 도구 놓기), 📏 자만 복사 메뉴가 뜨고 재는 상태가 남는다. `ui/measure.js`에는 0.17.0에도 오른쪽 클릭 처리가 없었다. 전에 기본 메뉴가 뜨며 끌기가 끊겼던 것으로 짐작 (확인 못 함). 고칠 안: 자도 그리기와 같은 규칙 / 메뉴에 "자 끄기" / 끄는 중일 때만 취소 → 사용자 답을 듣고 만든다
 - 연습할 종목 (지금 기본 관심종목: NVDA·TSLA·QQQ·SPY·SOXL·TQQQ·AAPL·AMD·PLTR·MSTR·COIN + 나스닥100 토큰·BTC)
 - 레버리지 기본 최대 20배·청산 방식(남은 증거금은 돌려받는 Hyperliquid 방식)이 괜찮은지, 펀딩비·주말 디스커버리 바운드를 넣을지
 - 수수료 기본값 (지금 trade.xyz 가정: 시장가 0.09%, 지정가 0.03%, 미끄러짐 0.01%)
