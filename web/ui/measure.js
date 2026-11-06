@@ -169,6 +169,19 @@ export function createMeasure({ chart, getSeries, box, getBars, isDaily, getDeci
   };
   box.addEventListener("pointerup", end, true);
   box.addEventListener("pointercancel", end, true);
+  // 오른쪽 클릭 = 그리기 도구와 같은 규칙 (0.19.1, 사용자: "재다가 우측 마우스로 해제되던 게 안 된다"):
+  // 재는 중이면 취소, 아니면 자 끄기 (잰 결과는 ✕ 전까지 남는다). 자가 꺼져 있으면 칸의 📋 복사 메뉴로 넘긴다
+  box.addEventListener(
+    "contextmenu",
+    (e) => {
+      if (!on && !dragging) return;
+      e.stopPropagation();
+      e.preventDefault();
+      if (dragging || waitingB) api.clear();
+      else api.toggle(false);
+    },
+    true
+  );
   close.addEventListener("pointerdown", (e) => e.stopPropagation(), true);
   close.addEventListener("click", (e) => {
     e.stopPropagation();

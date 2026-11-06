@@ -625,6 +625,7 @@ export function createDrawings(o) {
   box.addEventListener(
     "contextmenu",
     (e) => {
+      if (o.measureOn()) return; // 📏을 켠 동안은 측정이 오른쪽 클릭을 받는다 (0.19.1)
       const p = local(e);
       // 도구를 든 채 우클릭 = 그리던 것 취소, 한 번 더 = 그리기 그만
       if (tool && inPane(p) && e.target.tagName === "CANVAS") {

@@ -599,6 +599,43 @@ section("📋 이미지 복사 — 칸을 한 장으로 (0.18.0)");
   c.root.remove();
 }
 
+section("📏 자 오른쪽 클릭 — 그리기 도구와 같은 규칙 (0.19.1)");
+{
+  const { createMeasure } = await import("../ui/measure.js");
+  const box = document.createElement("div");
+  box.style.cssText = "position:fixed;left:0;top:0;width:400px;height:300px";
+  box.setPointerCapture = () => {}; // 시험에서 만든 포인터는 잡을 수 없다
+  document.body.append(box);
+  const chart = { timeScale: () => ({ coordinateToLogical: (x) => x, logicalToCoordinate: (l) => l, subscribeVisibleLogicalRangeChange() {} }), applyOptions() {} };
+  const series = { coordinateToPrice: (y) => 300 - y, priceToCoordinate: (p) => 300 - p };
+  const m = createMeasure({ chart, getSeries: () => series, box, getBars: () => [], isDaily: () => false, getDecimals: () => 2 });
+  const ptr = (type, x, y, extra) => box.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0, pointerType: "mouse", ...extra }));
+  const click = (x, y) => (ptr("pointerdown", x, y), ptr("pointerup", x, y));
+  const right = () => {
+    const e = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    box.dispatchEvent(e);
+    return e.defaultPrevented ? 1 : 0; // 1 = 자가 받음, 0 = 칸의 복사 메뉴로
+  };
+  const shown = () => (box.querySelector(".measure-label").style.display === "none" ? 0 : 1);
+  m.toggle(true);
+  click(100, 100);
+  const first = [shown(), right(), shown(), m.on ? 1 : 0];
+  check("첫 점 찍고 오른쪽 클릭: 첫 점만 취소, 자는 켜진 채", first, [1, 1, 0, 1]);
+  click(100, 100);
+  click(200, 50);
+  const done = [shown(), right(), shown(), m.on ? 1 : 0];
+  check("다 재고 오른쪽 클릭: 자 꺼짐, 잰 결과는 남음", done, [1, 1, 1, 0]);
+  check("자가 꺼져 있으면 오른쪽 클릭은 칸의 복사 메뉴로", right(), 0);
+  m.clear();
+  m.toggle(true);
+  check("자만 켜고 오른쪽 클릭: 자 꺼짐", [right(), m.on ? 1 : 0], [1, 0]);
+  ptr("pointerdown", 100, 100, { shiftKey: true });
+  ptr("pointermove", 150, 60, { shiftKey: true });
+  check("자 없이 Shift+끌기 중 오른쪽 클릭: 재던 것 취소", [right(), shown()], [1, 0]);
+  ptr("pointerup", 150, 60, { shiftKey: true });
+  box.remove();
+}
+
 // ── 모든 화면 파일이 문법 오류 없이 읽히는지 (하나라도 깨지면 EXE가 검은 화면에서 멈춘다) ──
 section("파일 읽기 (문법 오류 없는지)");
 {
