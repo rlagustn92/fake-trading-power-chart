@@ -1,7 +1,7 @@
 # 작업 현황 — 어디까지 했나 (FAKE TRADING POWER CHART)
 
 **기준일: 2026-11-06 (금요일)** · 이 파일을 고칠 때마다 기준일도 바꾼다.
-**버전 0.20.0** ([CHANGELOG.md](CHANGELOG.md), 2026-11-06 GitHub main에 올림) · 시험 154개 통과 (Rust 13개) · EXE `release\FAKE TRADING POWER CHART.exe` + 바탕화면 바로가기 (2026-10-30, Rust·VS Build Tools·tauri-cli 설치함)
+**버전 0.20.0** ([CHANGELOG.md](CHANGELOG.md), 2026-11-06 GitHub main에 올림 · Releases v0.20.0 빌드 성공 확인) · 시험 154개 통과 (Rust 13개) · EXE `release\FAKE TRADING POWER CHART.exe` + 바탕화면 바로가기 (2026-10-30, Rust·VS Build Tools·tauri-cli 설치함)
 
 같이 볼 것: 사용법 [README.md](README.md) · 기획 [FAKE_TRADING_기획서.md](FAKE_TRADING_기획서.md) · 데이터 조사 [DATA_RESEARCH.md](DATA_RESEARCH.md) · 다음 할 일 [NEXT_START_HERE.md](NEXT_START_HERE.md) · 원본 기획 [SPEC.md](SPEC.md)
 
