@@ -71,6 +71,45 @@ export function lineAt(A, B, L) {
   return A.F + ((B.F - A.F) * (L - A.L)) / (B.L - A.L);
 }
 
+/**
+ * 꼭지점 자석 (0.20.0, 사용자: "손떨림이 있어서 정교한 걸 못 해"): 누른 곳 좌우 K봉 안의 최고가·최저가 중 누른 높이에 가까운 쪽 {L, p}.
+ * 같은 값이면 누른 곳에 가까운 봉. 둘 다 reach(화면 픽셀)보다 멀면 null
+ */
+export function snapPeak(bars, L, K, y, yOf, reach, lineOnly = false) {
+  const near = (i, cur) => Math.abs(i - L) < Math.abs(cur.L - L);
+  let hi = null;
+  let lo = null;
+  for (let i = Math.max(0, L - K); i <= Math.min(bars.length - 1, L + K); i++) {
+    const h = lineOnly ? bars[i].c : bars[i].h;
+    const l = lineOnly ? bars[i].c : bars[i].l;
+    if (!hi || h > hi.p || (h === hi.p && near(i, hi))) hi = { L: i, p: h };
+    if (!lo || l < lo.p || (l === lo.p && near(i, lo))) lo = { L: i, p: l };
+  }
+  if (!hi) return null;
+  const dHi = Math.abs((yOf(hi.p) ?? 1e9) - y);
+  const dLo = Math.abs((yOf(lo.p) ?? 1e9) - y);
+  if (Math.min(dHi, dLo) >= reach) return null;
+  return dHi <= dLo ? hi : lo;
+}
+
+/**
+ * 평행선을 얼마나 옮길지 (F 공간 차이): 두 점 사이 봉 중 선에서 가장 먼 쪽으로.
+ * 고점끼리 이은 선은 가장 낮은 저점으로, 저점끼리 이은 선은 가장 높은 고점으로 간다. 사이에 봉이 없으면 null
+ */
+export function parallelOffset(bars, A, B, f, lineOnly = false) {
+  const from = Math.max(0, Math.ceil(Math.min(A.L, B.L)));
+  const to = Math.min(bars.length - 1, Math.floor(Math.max(A.L, B.L)));
+  if (from > to) return null;
+  let down = 0;
+  let up = 0;
+  for (let i = from; i <= to; i++) {
+    const line = lineAt(A, B, i);
+    down = Math.max(down, line - f(lineOnly ? bars[i].c : bars[i].l));
+    up = Math.max(up, f(lineOnly ? bars[i].c : bars[i].h) - line);
+  }
+  return down >= up ? -down : up;
+}
+
 /** 두 선의 만나는 점 (없거나 평행이면 null) */
 export function intersect(A1, B1, A2, B2) {
   const s1 = (B1.F - A1.F) / (B1.L - A1.L || 1e-9);

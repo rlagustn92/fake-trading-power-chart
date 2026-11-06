@@ -26,7 +26,7 @@ export function createDrawbar(root, { cfg, grid, onToggle }) {
         cfg.save();
         paint();
       },
-      "data-tip-text": "Magnet (자석)\n점을 찍을 때 가까운 봉의 시가·고가·저가·종가에 착 붙어요\nShift를 누르고 있으면 잠깐 꺼져요",
+      "data-tip-text": "Magnet (자석)\n대충 찍어도 근처 봉들의 진짜 고점·저점에 착 붙어요\n꼭지점에서 멀면 그 봉의 시가·고가·저가·종가에 붙어요\nShift를 누르고 있으면 잠깐 꺼져요",
     },
     h("span.dw-ico", "🧲"),
     h("span.dw-name", "Magnet")

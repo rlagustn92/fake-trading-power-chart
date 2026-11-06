@@ -4,13 +4,13 @@
 // - 만들기: 도구를 고르고 점을 찍는다(그냥 누르기). 누른 채 끌면 차트가 앞뒤로 움직인다(그리기는 그대로).
 //   "계속 그리기"(기본)면 하나를 다 그려도 도구가 그대로 → 우클릭·Esc로 그만. 자석: 가까운 봉의 시·고·저·종에 붙음(Shift = 끔)
 // - 고치기: 그린 것을 누르면 선택 → 점 끌기·통째로 옮기기, 위쪽 막대에서 색·두께·연장·잠금·알림·삭제
-import { createMapper, lineAt, intersect, distToSeg, extend } from "./geom.js";
+import { createMapper, lineAt, intersect, distToSeg, extend, snapPeak, parallelOffset } from "./geom.js";
 import { drawingsOf, setDrawings, onDrawings, newId } from "./store.js";
 import { anchoredVwap } from "../indicators/calc.js";
 import { h, colorPick } from "../ui/dom.js";
 import { num, signed, duration } from "../ui/format.js";
 import { openMenu } from "../ui/menu.js";
-import { ask } from "../ui/dialog.js";
+import { ask, toast } from "../ui/dialog.js";
 import { DAY } from "../core/tz.js";
 import { upColor, downColor } from "../core/colors.js";
 
@@ -26,6 +26,9 @@ export const TOOLS = {
   text: { name: "Text", n: 1, icon: "T" },
 };
 const TEXT_SIZE = { 1: 14, 2: 18, 3: 26 };
+const LINE_LIKE = new Set(["trend", "info"]); // 연장·평행선 복사가 되는 것
+const SNAP_X = 24; // 꼭지점 자석: 누른 곳 좌우로 찾는 폭 (화면 픽셀, 봉이 좁게 보이면 봉 수가 늘어난다)
+const SNAP_Y = 36; // 자석: 이 높이(화면 픽셀)보다 멀면 안 붙는다
 const MCTX = document.createElement("canvas").getContext("2d"); // 글자 폭 재기
 const START_COLOR = { trend: "#5ec8d8", info: "#e8eaed", hline: "#ffb020", hray: "#ffb020", triangle: "#b18cff", fib: "#a0a6ae", avwap: "#ff6fae", brush: "#ffb020", text: "#e8eaed" };
 // 그리기 색 16가지 + 🎨 직접 고르기 (0.13.0, 사용자: "색상도 더 다양하게")
@@ -61,6 +64,7 @@ export function createDrawings(o) {
   const { chart, box, cfg } = o;
   let tool = null; // 만드는 중인 도구 종류
   let draft = null; // {type, pts, hover}
+  let aim = null; // 도구를 들고 첫 점을 찍기 전: 지금 누르면 붙을 곳 (자석이 어디로 끌지 미리 보여 준다)
   let press = null; // 도구를 든 채 누른 곳 {x, y, shift} → 손을 뗄 때 거의 안 움직였으면 점 찍기, 끌었으면 차트 이동
   let selId = null;
   let drag = null; // {id, idx(-1 = 통째로), x, y, orig}
@@ -112,12 +116,17 @@ export function createDrawings(o) {
       return off ? { ...pt, o: off } : pt;
     }
     const v = o.view();
-    if ((cfg.chart.magnet ?? true) && !e?.shiftKey && L >= 0 && L < v.bars.length) {
+    const magnet = (cfg.chart.magnet ?? true) && !e?.shiftKey;
+    if (magnet) {
+      const peak = snapPeak(v.bars, L, Math.max(1, Math.round(SNAP_X / ax.sp)), y, yOf, SNAP_Y, v.lineOnly);
+      if (peak) return m.point(peak.L, peak.p);
+    }
+    if (magnet && L >= 0 && L < v.bars.length) {
       const b = v.bars[L];
       let best = null;
       for (const c of v.lineOnly ? [b.c] : [b.o, b.h, b.l, b.c]) {
         const d = Math.abs((yOf(c) ?? 1e9) - y);
-        if (d < 36 && (!best || d < best.d)) best = { c, d };
+        if (d < SNAP_Y && (!best || d < best.d)) best = { c, d };
       }
       if (best) p = best.c;
     }
@@ -360,6 +369,9 @@ export function createDrawings(o) {
       const st = draft.type === "brush" ? brushStyle(cfg) : { color: START_COLOR[draft.type], width: 2 }; // 그리는 동안에도 고른 브러시 색·두께로
       const s = shapeOf({ id: "draft", type: draft.type, pts, color: st.color, width: st.width, extR: draft.type === "fib" }, m, ax);
       if (s) shapes.push({ dw: { id: "draft" }, s, draft: true });
+    } else if (aim && tool) {
+      const s = shapeOf({ id: "draft", type: "trend", pts: [aim], color: START_COLOR[tool], width: 2 }, m, ax);
+      if (s) shapes.push({ dw: { id: "draft" }, s, draft: true });
     }
     axisLabels = shapes.flatMap(({ s }) => s.axis).filter((a) => a.y != null).map(axisView);
   }
@@ -567,12 +579,22 @@ export function createDrawings(o) {
         moveDrag(p, e);
         return;
       }
+      if (tool && tool !== "brush" && tool !== "text") {
+        aim = !e.buttons && inPane(p) ? pointAt(p.x, p.y, e) : null;
+        redraw();
+        return;
+      }
       if (e.buttons || tool) return;
       const hit = inPane(p) && hitTest(p.x, p.y);
       box.classList.toggle("dw-hover", !!hit);
     },
     true
   );
+  box.addEventListener("pointerleave", () => {
+    if (!aim) return;
+    aim = null;
+    redraw();
+  });
 
   /** 도구를 든 채 한 번 누른 곳에 점 찍기 */
   function place(p, ev) {
@@ -584,6 +606,7 @@ export function createDrawings(o) {
     const pt = pointAt(p.x, p.y, ev);
     if (!pt) return;
     if (!draft) {
+      if (selId) select(null);
       draft = { type: tool, pts: [pt], hover: pt };
       if (TOOLS[tool].n === 1) finish();
     } else {
@@ -683,8 +706,9 @@ export function createDrawings(o) {
     if (!d || d.pts.length < need) return;
     const st = d.type === "brush" ? brushStyle(cfg) : { color: START_COLOR[d.type], width: d.type === "hline" || d.type === "hray" ? 1 : 2 };
     const dw = { id: newId(), type: d.type, pts: d.type === "brush" ? d.pts : d.pts.slice(0, TOOLS[d.type].n), color: st.color, width: st.width, extL: false, extR: d.type === "fib", locked: false };
-    // 계속 그리기면 도구를 그대로 두고 바로 다음 것을 그린다 (선택 막대도 안 띄움)
-    if (cfg.chart.keep_draw_tool ?? true) selId = null;
+    aim = null;
+    // 계속 그리기면 도구를 그대로 두고 바로 다음 것을 그린다. 추세선은 막대를 띄워 둔다 → 세 번째 클릭으로 바로 평행선 (0.20.0)
+    if (cfg.chart.keep_draw_tool ?? true) selId = LINE_LIKE.has(d.type) ? dw.id : null;
     else {
       selId = dw.id;
       setTool(null);
@@ -719,6 +743,19 @@ export function createDrawings(o) {
     save(list().filter((x) => x.id !== id));
   }
 
+  // 평행선 복사 (0.20.0): 같은 기울기로 두 점 사이 가장 먼 봉에 저절로 붙인다 → 손으로 맞출 일이 없다
+  function copyParallel(dw) {
+    const m = mapper();
+    const v = o.view();
+    const [A, B] = dw.pts.map((p) => ({ L: m.logical(p), F: m.f(p.p) }));
+    const off = parallelOffset(v.bars, A, B, m.f, v.lineOnly);
+    if (!off) return toast("이 선의 두 점 사이에 붙을 봉이 없어요");
+    const nd = { ...dw, id: newId(), pts: dw.pts.map((p) => ({ ...p, p: m.finv(m.f(p.p) + off) })), locked: false };
+    selId = nd.id;
+    save([...list(), nd]);
+    paintBar();
+  }
+
   // ── 선택하면 뜨는 막대: 색·두께·연장·잠금·알림·삭제 ──
   const bar = h("div.dw-bar", { hidden: true });
   box.append(bar);
@@ -743,10 +780,11 @@ export function createDrawings(o) {
     bar.hidden = !dw;
     if (!dw) return;
     const b = (label, on, onclick, tip) => h(`button${on ? ".on" : ""}`, { onclick, "data-tip-text": tip }, label);
+    const lineLike = LINE_LIKE.has(dw.type);
+    const parallel = (label) => b(label, false, () => copyParallel(dw), "평행선 복사\n같은 기울기로 두 점 사이 가장 낮은 저점에 붙여요\n(저점끼리 이은 선이면 가장 높은 고점에)");
     const mini = !!cfg.chart.draw_bar_mini;
     bar.classList.toggle("mini", mini);
-    if (mini) return bar.replaceChildren(b("✏️", false, () => setBarMini(false), "설정 막대 펼치기 (색·두께·연장)"));
-    const lineLike = dw.type === "trend" || dw.type === "info";
+    if (mini) return bar.replaceChildren(...[lineLike ? parallel("∥") : null, b("✏️", false, () => setBarMini(false), "설정 막대 펼치기 (색·두께·연장)")].filter(Boolean));
     const items = [
       h("span.dw-bar-name", { "data-tip": dw.type }, TOOLS[dw.type].name),
       h("span.dw-colors", DRAW_COLORS.map((c) => h(`button.swatch${dw.color === c ? ".on" : ""}`, { style: `background:${c}`, onclick: () => update(dw.id, { color: c }) })), colorPick(dw.color, (c) => update(dw.id, { color: c }))),
@@ -756,6 +794,7 @@ export function createDrawings(o) {
       dw.type === "text" ? b("✎ 고치기", false, () => writeText(null, dw), "글자 고치기") : null,
       lineLike ? b("← 연장", dw.extL, () => update(dw.id, { extL: !dw.extL }), "왼쪽으로 화면 끝까지 늘리기") : null,
       lineLike || dw.type === "fib" ? b("연장 →", dw.extR, () => update(dw.id, { extR: !dw.extR }), "오른쪽으로 화면 끝까지 늘리기") : null,
+      lineLike ? parallel("∥ 평행선") : null,
       b(dw.locked ? "🔒" : "🔓", dw.locked, () => update(dw.id, { locked: !dw.locked }), "잠금: 실수로 옮기지 않게"),
       ALERTABLE.has(dw.type) ? b("🔔", false, () => o.onAlert?.(dw), "알림 만들기\n가격(종가)이 이 선을 넘으면 알려줘요") : null,
       b("🗑", false, () => remove(dw.id), "지우기 (Delete)"),
@@ -768,9 +807,10 @@ export function createDrawings(o) {
   function menu(dw, x, y) {
     openMenu(null, [
       { header: TOOLS[dw.type].name },
-      ...(dw.type === "trend" || dw.type === "info" ? [
+      ...(LINE_LIKE.has(dw.type) ? [
         { label: "← 왼쪽 연장", on: dw.extL, onclick: () => update(dw.id, { extL: !dw.extL }) },
         { label: "오른쪽 연장 →", on: dw.extR, onclick: () => update(dw.id, { extR: !dw.extR }) },
+        { label: "∥ 평행선 복사", onclick: () => copyParallel(dw) },
       ] : []),
       dw.type === "text" ? { label: "✎ 글자 고치기", onclick: () => writeText(null, dw) } : null,
       { label: dw.locked ? "🔓 잠금 풀기" : "🔒 잠그기", onclick: () => update(dw.id, { locked: !dw.locked }) },
@@ -808,6 +848,7 @@ export function createDrawings(o) {
   function setTool(t) {
     tool = t;
     draft = null;
+    aim = null;
     press = null;
     lockChart(false);
     box.classList.toggle("drawing", !!t);

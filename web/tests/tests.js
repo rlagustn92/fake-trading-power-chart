@@ -599,6 +599,30 @@ section("📋 이미지 복사 — 칸을 한 장으로 (0.18.0)");
   c.root.remove();
 }
 
+section("🧲 꼭지점 자석·평행선 복사 (0.20.0)");
+{
+  const { snapPeak, parallelOffset } = await import("../drawings/geom.js");
+  const bars = [[10, 9], [12, 10], [15, 11], [13, 10], [11, 8], [12, 9]].map(([h, l]) => ({ h, l, c: (h + l) / 2 }));
+  const yOf = (p) => 300 - p * 10; // 1원 = 화면 10칸
+  const snap = (L, K, price, reach = 40, line = false) => {
+    const r = snapPeak(bars, L, K, yOf(price), yOf, reach, line);
+    return r ? [r.L, r.p] : [-1, -1];
+  };
+  check("옆 봉(3번)을 고점 높이로 눌러도 진짜 고점 2번 15에 붙음", snap(3, 2, 14), [2, 15]);
+  check("같은 봉을 아래쪽으로 누르면 진짜 저점 4번 8에 붙음", snap(3, 2, 8.5), [4, 8]);
+  check("고점·저점 둘 다 멀면 안 붙음", snap(3, 1, 11.5, 30), [-1, -1]);
+  check("찾는 폭 밖의 고점은 안 봄 (0번 ±1봉 → 1번 12)", snap(0, 1, 12), [1, 12]);
+  check("봉이 없는 먼 오른쪽은 안 붙음", snap(20, 2, 14), [-1, -1]);
+  check("선 차트는 고가·저가 대신 종가로", snap(2, 1, 13, 40, true), [2, 13]);
+  const flat = [{ h: 10, l: 9, c: 9.5 }, { h: 10, l: 9, c: 9.5 }, { h: 10, l: 9, c: 9.5 }];
+  check("같은 고가가 여럿이면 누른 곳에 가까운 봉", snapPeak(flat, 2, 2, yOf(10), yOf, 40).L, 2);
+  const id = (x) => x;
+  check("고점끼리 이은 선 → 가장 낮은 저점으로 (사이 봉 기준 -5)", parallelOffset(bars, { L: 2, F: 15 }, { L: 5, F: 12 }, id), -5);
+  check("저점끼리 이은 선 → 가장 높은 고점으로 (+5.667)", parallelOffset(bars, { L: 1, F: 10 }, { L: 4, F: 8 }, id), 5 + 2 / 3, 1e-9);
+  check("로그 눈금: 수평선 15 → 저점 8 = 비율로 옮김", Math.exp(parallelOffset(bars, { L: 2, F: Math.log(15) }, { L: 4, F: Math.log(15) }, Math.log)), 8 / 15, 1e-9);
+  check("두 점 사이에 봉이 없으면 안 만듦", parallelOffset(bars, { L: 20, F: 1 }, { L: 30, F: 2 }, id) ?? -1, -1);
+}
+
 section("📏 자 오른쪽 클릭 — 그리기 도구와 같은 규칙 (0.19.1)");
 {
   const { createMeasure } = await import("../ui/measure.js");
