@@ -1765,6 +1765,32 @@ export function createCell(env, cc) {
       const i = countEnded(full, endT);
       return i < full.length ? barEnd(full[i]) : null;
     },
+    /** 리플레이 자동 멈춤 (0.23.0): prev 뒤 ~ endT까지 끝난 봉의 번호 (보이는 봉 기준). 봉 마감 기준이라 1분봉과 상관없다 */
+    replayClosedBars(prev, endT) {
+      const out = [];
+      if (!replay) return out;
+      for (let k = bars.length - 1; k >= 0; k--) {
+        const e = barEnd(bars[k]);
+        if (e <= prev) break;
+        if (e <= endT) out.push(k);
+      }
+      return out;
+    },
+    /** 매매 방식 지표가 그 봉들에서 낸 롱·숏 후보 신호 → [{tag, short}] (회색 신호는 안 셈) */
+    guideSignalsOn(ks) {
+      const out = [];
+      if (!ks.length) return out;
+      const want = new Set(ks);
+      for (const hd of handles) {
+        let list = [];
+        try {
+          list = hd.signals?.() ?? [];
+        } catch {}
+        const e = [...list].reverse().find((x) => want.has(x.i));
+        if (e) out.push({ tag: hd.tag ?? hd.inst.id, short: !!e.short, ev: e });
+      }
+      return out;
+    },
     /** endT 다음에 보일 시각: 1분봉이 있으면 다음 1분, 없으면 다음 봉이 끝나는 시각 (null = 끝, endT 그대로 = 읽는 중) */
     replayNextEnd(endT) {
       if (resumeT != null) return resumeT; // 봉을 바꾸는 중: 다 읽을 때까지 제자리

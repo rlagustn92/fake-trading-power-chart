@@ -402,5 +402,24 @@ export function createAlerts({ cfg, data, onFire, onChange }) {
     },
     countFor: (sym) => active().filter((a) => a.sym === sym).length,
     check,
+    /**
+     * 리플레이 자동 멈춤 (0.23.0): 켜 둔 이 종목 알림 중, 차트 봉 k가 끝나며 조건이 일어난 것 (봉 마감 기준, 1분봉 안 씀).
+     * bars = 리플레이로 잘린 칸의 봉(미래 없음), ks = 이번에 끝난 봉 번호들. 다른 봉 기준 지표 알림은 건너뛴다. 알림을 울리거나 끄지는 않는다
+     */
+    replayHits(sym, tf, info, bars, ks) {
+      const out = [];
+      for (const a0 of active()) {
+        if (a0.sym !== sym) continue;
+        const a = { ...a0, tf };
+        if (htfOf(a)) continue;
+        let S = null;
+        try {
+          S = series(a, info, bars);
+        } catch {}
+        if (!S) continue;
+        if (ks.some((k) => k >= 1 && happened(a, S, k - 1, k))) out.push(a0);
+      }
+      return out;
+    },
   };
 }

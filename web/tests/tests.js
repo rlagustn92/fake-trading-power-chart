@@ -297,6 +297,20 @@ check("XIRR: 1년 뒤 10% → 10%", xirr([[0, -1000], [365 * day, 1100]]), 0.1, 
       const lb = [10, 9, 10, 10, 10].map((c, k) => ({ t: k * 60, o: c, h: c + 0.2, l: c - 0.2, c }));
       const sig = (i, entry = 10) => ({ i, entry, stop: entry - 0.5 });
       check("같은 자리 재실패: 앞 신호가 손절선에 닿았으면 참 · 멀리 떨어진 가격이면 아님 · 앞 신호가 안 닿았으면 아님", [yes(failedHere(lb, [sig(0)], sig(3))), yes(failedHere(lb, [sig(0)], sig(3, 12))), yes(failedHere(lb, [sig(2)], sig(4)))], [1, 0, 0]);
+      // 신호 결과 (0.23.0): 익절선·손절선 중 먼저 닿은 쪽, 한 봉에서 둘 다면 손절, 아직이면 null
+      const { outcomeOf } = await import("../indicators/guides.js");
+      const ob = (rows) => rows.map(([h, l], k) => ({ t: k * 60, o: (h + l) / 2, h, l, c: (h + l) / 2 }));
+      const ev = { i: 0, entry: 10, stop: 9, targets: [{ price: 12 }, { price: 11 }] };
+      const oc = (r) => (r == null ? -1 : r.k * 10 + (r.win ? 1 : 0)); // 봉 번호×10 + (익절이면 1)
+      check("신호 결과: 가장 가까운 익절선(11) 먼저 → ○ · 손절 먼저 → ✕ · 한 봉에서 둘 다 → ✕ · 아직 → 없음 · 숏도", [
+        oc(outcomeOf(ob([[10, 10], [10.5, 9.5], [11.2, 10.4]]), ev)),
+        oc(outcomeOf(ob([[10, 10], [10.2, 8.9]]), ev)),
+        oc(outcomeOf(ob([[10, 10], [11.5, 8.5]]), ev)),
+        oc(outcomeOf(ob([[10, 10], [10.5, 9.5]]), ev)),
+        oc(outcomeOf(ob([[10, 10], [9.5, 8.8]]), { i: 0, entry: 10, stop: 11, targets: [{ price: 9 }] })),
+      ], [21, 10, 10, -1, 11]);
+      const SIGS = ["sixma", "pull20", "setup50", "pistol", "lshape", "vwapswing", "barread"];
+      check("자동 멈춤: 신호 지표 7개가 이름표와 신호 목록을 준다", SIGS.filter((id) => { const hd = IND[id].make(mkCtx("5m"), wd({ id })); hd.render(rw, 0); return typeof hd.tag === "string" && Array.isArray(hd.signals()); }).length, 7);
       // 자동 피보: 저점이 먼저면 오른 움직임 → 0%는 고점, 100%는 저점, 50%는 한가운데
       const fb = [10, 11, 9, 12, 15, 14, 13].map((c, k) => ({ t: k * 60, o: c, h: c + 1, l: c - 1, c }));
       const af = S.autoFib(fb, 120);

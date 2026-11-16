@@ -15,7 +15,7 @@ import { isDailyTf } from "../core/bars.js";
 
 const SPEEDS = [1, 2, 5, 10, 30];
 
-export function createReplay(root, { cfg, grid, gridBox, toast, onChange, onPrepare, onBegin, onStep, onStop, confirmEnd }) {
+export function createReplay(root, { cfg, grid, gridBox, toast, onChange, onPrepare, onBegin, onStep, onStop, confirmEnd, checkStop, onPlan, stakeOf }) {
   let picking = false;
   let active = false;
   let playing = false;
@@ -31,20 +31,38 @@ export function createReplay(root, { cfg, grid, gridBox, toast, onChange, onPrep
   // ⏭ 한 칸 = 보고 있는 봉 하나 (1시간봉이면 1시간). 전에는 1분봉이 있으면 1분씩이라 1시간봉에서 60번 눌러야 다음 봉이 나왔다 (사용자 2026-11-01, 0.14.1)
   const stepBtn = h("button", { onclick: () => (pause(), stepBar()), "data-tip-text": "봉 하나 앞으로 (→)\n지금 보는 봉만큼 (1시간봉이면 1시간, 5분봉이면 5분)\nShift+→ = 1분만" }, "⏭ 한 칸");
   const speedSeg = h("span.rp-speed");
+  // ⏩ 다음 신호까지 (0.23.0): 화면을 봉마다 다시 그리지 않고 신호·알림이 나오는 봉까지 건너뛴다. 체결은 그 사이 1분봉을 다 본다 (⏭ 한 칸과 같은 길)
+  const skipBtn = h("button", { onclick: () => skipToNext(), "data-tip-text": "신호(⏸ 신호)나 알림(⏸ 알림)이 나오는 봉까지 한 번에 건너뛰어요\n그 사이 모의매매 주문이 체결되면 거기서 멈춰요\n다시 누르면 찾기를 멈춰요" }, "⏩ 다음 신호");
+  // 📝 신호로 주문선 (0.23.0): 신호에서 멈췄을 때만 보인다 → 그 신호의 진입·손절·익절 가격에 💰 대기선
+  const planBtn = h("button.rp-plan", { onclick: () => lastPlan && onPlan?.(lastPlan), "data-tip-text": "방금 멈춘 신호의 진입·손절·익절 가격에 모의매매 대기선을 깔아요\n롱·숏은 신호 방향 · 깐 뒤에는 끌어서 옮기거나 💰 창에서 취소할 수 있어요" }, "📝 주문선 놓기");
+  let lastPlan = null; // {side, entry, stop, tp, tag, t}
+  let skipping = false;
   const randomBtn = h("button", { onclick: () => startRandom(), "data-tip-text": "받아 둔 기간 중 아무 때나에서 시작\n날짜를 모르고 연습하면 외운 차트가 아니라 실력으로 해요" }, "🎲 아무 때나");
   const repick = h("button", { onclick: () => start(), "data-tip-text": "시작할 곳을 차트에서 다시 고르기" }, "📍 시점 다시");
   const stopBtn = h("button", { onclick: () => requestStop(), "data-tip-text": "끝내고 지금으로 돌아가기 (Esc)" }, "✕ 끝내기");
+  // 자동 멈춤 (0.23.0, 사용자: "너무 빨리 넘기면 신호가 훅 지나간다"): 재생 중 봉이 끝날 때 켜 둔 매매 방식 지표의 롱·숏 후보 신호나 내 알림이 있으면 멈춘다
+  const stopKeys = [
+    ["replay_stop_sig", "⏸ 신호", "재생 중 매매 방식 지표(새 지표)에 ▲ 롱 후보 · ▼ 숏 후보 신호가 뜨면 멈춰요\n봉이 끝나는 순간 기준 (진행 중인 봉의 화살표는 안 봐요)\n회색 신호(거래량 약함 등)에서는 안 멈춰요"],
+    ["replay_stop_alert", "⏸ 알림", "재생 중 이 종목에 켜 둔 🔔 알림 조건이 맞으면 멈춰요 (그은 선 돌파 등)\n봉이 끝나는 순간 기준 · 알림을 울리거나 끄지는 않아요\n다른 봉 기준 지표 알림(예: 15분봉 VWMA)은 빼고 봐요"],
+  ];
+  const stopBtns = stopKeys.map(([key, label, tip]) =>
+    h("button", { onclick: () => ((cfg.chart[key] = !(cfg.chart[key] ?? true)), cfg.save(), paint()), "data-tip-text": tip }, label)
+  );
   // 모의매매로 들고 있거나 대기선을 깔아 둔 채 끝내거나 새로 시작하면 먼저 묻는다 (main.js guardTrading, 0.13.0). true = 바로 해도 됨
   const mayEnd = (what, proceed) => !confirmEnd || confirmEnd(what, proceed); // 📡 실시간 판도 (리플레이를 시작하면 끝난다)
   function requestStop() {
     if (mayEnd("끝내면", () => stop())) stop();
   }
-  root.replaceChildren(h("span.rp-title", { "data-tip": "replay" }, "▶ 리플레이"), status, playBtn, stepBtn, h("span.rp-label", "속도"), speedSeg, h("div.grow"), randomBtn, repick, stopBtn);
+  root.replaceChildren(h("span.rp-title", { "data-tip": "replay" }, "▶ 리플레이"), status, playBtn, stepBtn, skipBtn, planBtn, h("span.rp-label", "속도"), speedSeg, h("span.rp-label", "자동 멈춤"), ...stopBtns, h("div.grow"), randomBtn, repick, stopBtn);
 
   function paint() {
     root.hidden = !picking && !active;
     playBtn.textContent = playing ? "⏸ 멈춤" : "▶ 재생";
     for (const b of [playBtn, stepBtn, repick]) b.disabled = !active;
+    stopKeys.forEach(([key], k) => stopBtns[k].classList.toggle("on", cfg.chart[key] ?? true));
+    skipBtn.disabled = !active;
+    skipBtn.textContent = skipping ? "⏹ 찾기 멈춤" : "⏩ 다음 신호";
+    planBtn.hidden = !(active && lastPlan && lastPlan.t === endT);
     // 1분씩 흘러가면 "분/초", 아니면 "봉/초" (바뀔 때만 다시 그린다)
     const u = master?.replayMinutes ? "분" : "봉";
     if (u !== unit) {
@@ -189,6 +207,78 @@ export function createReplay(root, { cfg, grid, gridBox, toast, onChange, onPrep
     for (const c of cells) c.replayTo(endT);
     paint();
     onStep?.(master, endT, prev);
+    autoStop(prev);
+  }
+
+  /** 자동 멈춤: 이번에 끝난 봉에 신호·알림이 있으면 재생을 멈추고 알려 준다. ⏭ 한 칸으로 넘겼을 때는 알려만 준다 */
+  function autoStop(prev) {
+    const r = checkStop?.(master, prev, endT);
+    lastPlan = null;
+    if (!r) return paint();
+    if (playing) pause();
+    showStop(r);
+  }
+  function showStop(r) {
+    lastPlan = r.plan ? { ...r.plan, t: endT } : null;
+    toast(r.text, 5000);
+    paint();
+  }
+
+  /** ⏩ 다음 신호·알림이 나오는 봉까지. 매매하는 칸만 봉마다 따라가고 같이 가는 칸은 끝에 한 번 */
+  async function skipToNext() {
+    if (!active) return;
+    if (skipping) {
+      skipping = false;
+      return;
+    }
+    pause();
+    if (!(cfg.chart.replay_stop_sig ?? true) && !(cfg.chart.replay_stop_alert ?? true)) return toast("⏸ 신호나 ⏸ 알림을 켜야 다음 것을 찾아요");
+    skipping = true;
+    lastPlan = null;
+    paint();
+    const me = master;
+    const stake0 = stakeOf?.() ?? "";
+    let found = null;
+    let waits = 0;
+    for (let n = 0; n < 5000 && skipping && master === me; n++) {
+      const target = me.replayBarEnd(endT);
+      if (target == null) {
+        toast("마지막 봉까지 왔어요 · ✕ 끝내기를 누르면 지금으로 돌아가요");
+        break;
+      }
+      let t = endT;
+      for (let k = 0; k < 20000 && t < target; k++) {
+        const nx = me.replayNextEnd(t);
+        if (nx == null || nx <= t) break;
+        t = nx;
+      }
+      if (t <= endT) {
+        // 1분봉을 받는 중 · 빈 곳을 채우는 중 → 잠깐 기다렸다 다시 (너무 오래면 그만)
+        if (++waits > 100) break;
+        await new Promise((r) => setTimeout(r, 150));
+        n--;
+        continue;
+      }
+      waits = 0;
+      const prev = endT;
+      endT = t;
+      me.replayTo(endT);
+      onStep?.(me, endT, prev);
+      found = checkStop?.(me, prev, endT);
+      if (found) break;
+      if ((stakeOf?.() ?? "") !== stake0) {
+        found = { text: "⏸ 멈춤 · 모의매매 주문이 체결됐어요" };
+        break;
+      }
+      if (n % 4 === 3) {
+        paint();
+        await new Promise((r) => setTimeout(r, 0)); // 화면이 굳지 않게
+      }
+    }
+    skipping = false;
+    if (active && master === me) for (const c of cells) if (c !== me) c.replayTo(endT);
+    if (found) showStop(found);
+    else paint();
   }
 
   /**
@@ -211,6 +301,7 @@ export function createReplay(root, { cfg, grid, gridBox, toast, onChange, onPrep
     for (const c of cells) c.replayTo(endT);
     paint();
     onStep?.(master, endT, prev);
+    autoStop(prev);
   }
 
   function play() {
@@ -251,6 +342,7 @@ export function createReplay(root, { cfg, grid, gridBox, toast, onChange, onPrep
     requestStop,
     step,
     stepBar,
+    skipToNext,
     pause,
     toggle: () => (playing ? pause() : play()),
     refresh: () => paint(),

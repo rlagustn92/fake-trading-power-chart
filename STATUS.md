@@ -1,7 +1,7 @@
 # 작업 현황 — 어디까지 했나 (FAKE TRADING POWER CHART)
 
 **기준일: 2026-11-16 (월요일)** · 이 파일을 고칠 때마다 기준일도 바꾼다.
-**버전 0.22.0** ([CHANGELOG.md](CHANGELOG.md), 2026-11-16 롱·숏·쉼 딱지 · 자동 피보 · 그리기 피보 0.25 단위 — **아직 GitHub에 안 올림**. 올라가 있는 것은 0.21.0 매매 방식 지표 9개, 사용자가 EXE에서 써 봄) · 시험 185개 통과 (Rust 13개) · EXE `release\FAKE TRADING POWER CHART.exe` + 바탕화면 바로가기 (2026-10-30, Rust·VS Build Tools·tauri-cli 설치함)
+**버전 0.23.0** ([CHANGELOG.md](CHANGELOG.md), 2026-11-16 지난 신호 ○✕·성적 · 리플레이 자동 멈춤·⏩ 다음 신호·📝 주문선 — **아직 GitHub에 안 올림**. 올라가 있는 것은 0.22.0) · 시험 187개 통과 (Rust 13개) · EXE `release\FAKE TRADING POWER CHART.exe` + 바탕화면 바로가기 (2026-10-30, Rust·VS Build Tools·tauri-cli 설치함)
 
 같이 볼 것: 사용법 [README.md](README.md) · 기획 [FAKE_TRADING_기획서.md](FAKE_TRADING_기획서.md) · 데이터 조사 [DATA_RESEARCH.md](DATA_RESEARCH.md) · 다음 할 일 [NEXT_START_HERE.md](NEXT_START_HERE.md) · 원본 기획 [SPEC.md](SPEC.md)
 
@@ -121,6 +121,7 @@
 ---
 
 ## ⏳ 아직 확인 못 한 것
+0. **0.23.0 지난 신호 ○✕ · 리플레이 자동 멈춤 (2026-11-16)** — 사용자: "지난 신호선도 다 보고 싶다 · 리플레이가 너무 빨리 지나간다". `guides.js` `outcomeOf`·`spanPlans`(선은 결과 봉에서 끝, ○·✕ 표시는 `${uid}:res` 마커), `plan` 설정(전부·최근·끄기, 옛 `lines` 대신). 지표마다 `tag`·`signals()`, `cell.replayClosedBars`·`guideSignalsOn`, `alerts.replayHits`, `replay.js` `autoStop`(⏸ 신호·⏸ 알림, `cfg.chart.replay_stop_sig`·`replay_stop_alert`), main.js `checkStop`. 되감기는 사용자가 뺌. 성적 `statText`(딱지 옆 ○·✕ 개수, 짚은 봉까지만), 지표마다 `planned`·`outs`. ⏩ `replay.skipToNext`(매매 칸만 봉마다, 체결되면 멈춤 — main.js `stakeOf`), 📝 `replay` planBtn → main.js `onPlan` → `trading.placePlan`(신호 가격에 대기선, 익절·손절 켬). 확인: 시험 187개 · 개발 서버 NVDA 5분봉 리플레이에서 "브) 봉 읽기 ▲ 롱 후보"로 신호 봉이 끝나는 시각에 정확히 멈춤 · ⏩로 "이) 20·200 눌림 ▼ 숏 후보"까지 건너뛰고 📝로 숏 대기선(진입·손절·익절 손익비 2.8)이 깔림 · 알림 판정은 함수로만 확인(화면에서 알림으로 멈추는 것은 못 봄) · 대기선이 체결된 뒤 ⏩가 멈추는 것은 못 봄 · EXE 안 봄
 0. **0.22.0 딱지 · 자동 피보 (2026-11-16)** — 사용자가 0.21.0을 써 보고 "롱·숏·쉼이 한눈에 안 보인다, 글자가 어렵다"고 함. `guides.js` `verdictOf`·`withBadge`(범례 첫 칸 `badge`), `cell.js`가 큰 딱지로 그림. 자세한 글자는 `detail` 설정(기본 꺼짐). `setups.js` `autoFib` + 지표 `autofib`, 그리기 피보 `dw.q`(0.25 단위, `cfg.chart.fib_quarter`). 2차 검수(불장단타왕 규칙 사전·사례집 일부·제5·7부)로 ㄴ자 손절을 이평선 기준으로(`stopBy`), 권총은 큰 봉(기본 1시간봉) 역배열이면 회색(`big`), ㄴ자 딱지에 50·200 간격, 같은 자리 재실패 "조심"(`failedHere`, 막지 않음). "2연속 손절이면 쉼"은 넣었다가 사용자가 "모의매매 연습에 방해"라고 해서 뺌. 이 세 가지는 화면에서 신호가 뜨는 순간을 직접 보지는 못함. 확인: 시험 185개 · 개발 서버 NVDA 24h 5분봉에서 딱지(쉼·롱 후보·롱 쪽)와 자동 피보 선이 보임. 못 본 것: 그리기 피보 0.25 버튼을 화면에서 눌러 보지 않음 · EXE · 리플레이
 0. **0.21.0 매매 방식 지표 9개 (2026-11-16)** — `web/indicators/setups.js`(계산) + `guides.js`(그리기), 지표 창 맨 위. 결정·규칙은 CHANGELOG 0.21.0과 CLAUDE.md "0.21.0"
    - 2026-11-16 검수(교재와 한 줄씩 대조) 뒤 더한 것: 6선 매물대(자동), 20·200 갭 조건, 50·200 거래량 확인·골크/데크·VWMA 100 익절·시간 손절 알림, 이름 앞 약자(공·비·불·이·섀·브). 검수표는 사용자 PC의 교재 폴더(`00_지표_검수표.md`)

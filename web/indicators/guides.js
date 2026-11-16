@@ -56,16 +56,43 @@ function planSegs(ctx, ev, to = null) {
   for (const t of ev.targets ?? []) if (t.price != null && Number.isFinite(t.price)) segs.push({ from: ev.i, to, price: t.price, color: tpColor(), label: `${t.label} ${f(t.price)}`, dash: true });
   return segs;
 }
-/** 최근 count개 신호의 계획선. 맨 끝 신호가 최근 것이면 오른쪽 끝까지, 지난 것은 25봉만 */
-function spanPlans(ctx, evs, n, count) {
-  const use = count > 0 ? evs.slice(-count) : [];
+/**
+ * 신호 결과 (0.23.0): 신호 다음 봉부터 가장 가까운 익절선과 손절선 중 어느 쪽에 먼저 닿았나.
+ * 한 봉에서 둘 다 닿으면 손절로 센다 (봉 안의 순서를 모르니 보수적으로). 아직 둘 다 안 닿았으면 null.
+ * 보이는 봉까지만 본다 → 리플레이 중에는 그 시각까지의 결과만. → {k, win}
+ */
+export function outcomeOf(bars, ev) {
+  const d = ev.entry - ev.stop;
+  if (!(Math.abs(d) > 0)) return null;
+  const long = d > 0;
+  const tps = (ev.targets ?? []).map((t) => t?.price).filter((v) => v != null && Number.isFinite(v) && (long ? v > ev.entry : v < ev.entry));
+  const tp = tps.length ? (long ? Math.min(...tps) : Math.max(...tps)) : null;
+  for (let k = ev.i + 1; k < bars.length; k++) {
+    const b = bars[k];
+    if (long ? b.l <= ev.stop : b.h >= ev.stop) return { k, win: false };
+    if (tp != null && (long ? b.h >= tp : b.l <= tp)) return { k, win: true };
+  }
+  return null;
+}
+const lastN = (arr, n) => (n <= 0 ? [] : arr.slice(-n));
+/**
+ * 신호들의 계획선 (0.23.0, 사용자: "지난 신호선도 다 보고 싶다 · 차트를 뒤로 밀 때마다 나오면 된다"):
+ * 선은 결과가 난 봉(익절선·손절선에 먼저 닿은 봉)에서 끝나고 거기에 ○(익절 먼저)·✕(손절 먼저). 아직이면 오른쪽 끝까지.
+ * 화면 밖 선은 그리지 않으니(Levels) 신호가 많아도 가볍다. → {segs, marks}
+ */
+function spanPlans(ctx, bars, evs, count, outs) {
   const segs = [];
-  use.forEach((ev, k) => {
-    const next = use[k + 1];
-    const to = next ? Math.max(ev.i + 1, Math.min(next.i - 1, ev.i + 25)) : n - 1 - ev.i <= 40 ? null : ev.i + 25;
-    segs.push(...planSegs(ctx, ev, to));
-  });
-  return segs;
+  const marks = [];
+  for (let k = count <= 0 ? evs.length : Math.max(0, evs.length - count); k < evs.length; k++) {
+    const ev = evs[k];
+    const r = outs ? outs[k] : outcomeOf(bars, ev);
+    segs.push(...planSegs(ctx, ev, r ? r.k : null));
+    if (r) {
+      const long = ev.entry > ev.stop;
+      marks.push({ time: ctx.time(bars[r.k].t), position: long === r.win ? "aboveBar" : "belowBar", shape: "circle", size: 0.5, color: r.win ? tpColor() : STOP, text: r.win ? "○" : "✕" });
+    }
+  }
+  return { segs, marks };
 }
 /** R배 목표 (진입·손절 거리의 배수) */
 const rTargets = (ev, list) => {
@@ -73,7 +100,8 @@ const rTargets = (ev, list) => {
   return list.map(([k, label]) => ({ label: label ?? `${k}R`, price: ev.entry + k * d }));
 };
 
-const linesParam = { key: "lines", label: "계획선 그릴 신호 수", def: 2, min: 0, max: 10, tip: "가장 최근 신호 몇 개까지 진입·손절·익절 선을 그릴지\n0이면 화살표만" };
+const linesParam = { key: "plan", label: "계획선", def: "all", type: "select", options: [["all", "전부 (지난 신호도)"], ["last", "최근 신호만"], ["off", "끄기 (화살표만)"]], tip: "신호마다 진입(흰 선)·손절(주황 점선)·익절(점선)을 그려요\n선은 익절선이나 손절선에 먼저 닿은 봉에서 끝나고 ○(익절 먼저)·✕(손절 먼저)가 붙어요\n한 봉에서 둘 다 닿으면 ✕로 쳐요\n딱지 옆의 '지난 신호 ○18 ✕22' =익절선 먼저 18번, 손절선 먼저 22번 (최근 3,000봉 안)\n전부: 차트를 뒤로 밀면 지난 신호의 선도 보여요" };
+const planN = (p) => (p.plan === "off" ? 0 : p.plan === "last" ? 1 : Infinity);
 const shortsParam = { key: "shorts", label: "숏 신호도", def: true, type: "bool" };
 
 // ── 딱지 (0.22.0, 사용자: "롱이면 롱, 쉬라면 쉬라는 화끈한 표시가 부족 · 그 외 글자는 잘 모르겠다") ──
@@ -108,9 +136,22 @@ export function failedHere(bars, list, e) {
     return false;
   });
 }
-/** 범례 맨 앞에 딱지를 붙인다. v = {kind, why, text?} */
-function withBadge(p, tag, v, items) {
-  const head = { badge: v.kind, label: `${tag} ${v.text ?? BADGE_KO[v.kind]}`, value: v.why };
+/**
+ * 성적 (0.23.0): i번 봉까지 결과가 난 신호 중 익절선 먼저(○)·손절선 먼저(✕) 개수. 마우스로 옛 봉을 짚으면 그때까지의 성적 (미래 안 봄).
+ * 수수료·미끄러짐은 빼고 센다. 20번 미만이면 "표본 적음"
+ */
+function statText(planned, outs, i) {
+  let w = 0;
+  let l = 0;
+  planned.forEach((e, k) => {
+    const r = outs[k];
+    if (r && r.k <= i) r.win ? w++ : l++;
+  });
+  return w + l ? ` · 지난 신호 ○${w} ✕${l}${w + l < 20 ? " (표본 적음)" : ""}` : "";
+}
+/** 범례 맨 앞에 딱지를 붙인다. v = {kind, why, text?}, stat = 성적 글자 */
+function withBadge(p, tag, v, items, stat = "") {
+  const head = { badge: v.kind, label: `${tag} ${v.text ?? BADGE_KO[v.kind]}`, value: `${v.why}${stat}` };
   return p.detail ? [head, { br: true }, ...items] : [head];
 }
 
@@ -152,6 +193,8 @@ export function guideIndicators(T) {
       let m50 = [];
       let m200 = [];
       let evs = [];
+      let planned = []; // 계획선을 그리는 신호 = 딱지 성적·자동 멈춤·주문선이 쓰는 신호
+      let outs = []; // planned마다 결과 {k, win}
       let pend = null;
       let bigOrd = []; // 큰 봉의 50·200 배열 (up·down), 차트 봉마다
       let atrArr = [];
@@ -160,6 +203,8 @@ export function guideIndicators(T) {
       return {
         series: [sFast, sSlow, sVw, ...extra.map((x) => x.s)].filter(Boolean),
         prims: [lv],
+        tag: full ? "불) 50·200 셋업" : `불) ${KIND_KO[kinds[0]]}`,
+        signals: () => planned,
         render(bars, from) {
           last = bars;
           const cl = closes(bars);
@@ -220,9 +265,11 @@ export function guideIndicators(T) {
                 ? [{ label: "절반 익절", price: e.half }, sVw && vw[e.i] > e.entry ? { label: "VWMA 100", price: vw[e.i] } : null, sSlow && m200[e.i] > e.entry ? { label: `${p.slow}선`, price: m200[e.i] } : null].filter(Boolean)
                 : rTargets(e, [[1], [2], [3]]),
           }));
-          const segs = spanPlans(ctx, go, bars.length, p.lines);
+          const pl = spanPlans(ctx, bars, (planned = go), planN(p), (outs = planned.map((e) => outcomeOf(bars, e))));
+          const segs = pl.segs;
+          ctx.setMarkers(`${inst.uid}:res`, pl.marks);
           // 신호가 나온 베이스(옆으로 긴 구간)의 위·아래
-          for (const e of go.slice(-Math.max(0, p.lines))) segs.push({ from: e.s, to: e.i, price: e.hi, color: MUTE }, { from: e.s, to: e.i, price: e.lo, color: MUTE });
+          for (const e of lastN(go, planN(p))) segs.push({ from: e.s, to: e.i, price: e.hi, color: MUTE }, { from: e.s, to: e.i, price: e.lo, color: MUTE });
           if (pend) {
             const c = full ? "#f5c542" : inst.color;
             segs.push({ from: pend.s, to: null, price: pend.hi, color: c, dash: true, label: `${KIND_KO[pend.kind]} 대기 · 위로 마감하면 롱` });
@@ -257,7 +304,7 @@ export function guideIndicators(T) {
           const gapK = good && good.kind === "lshape" && m200[good.i] != null && atrArr[good.i] > 0 ? (m200[good.i] - m50[good.i]) / atrArr[good.i] : null;
           const note = gapK == null ? "" : gapK >= 5 ? " · 50·200 간격 큼 (반등 여지 큼)" : gapK < 2 ? " · 50·200 간격 작음 (반등 여지 작음)" : "";
           const rest = fresh && e.against ? `${ctx.tfName(p.big)}이 역배열이에요 (큰 방향 반대)` : fresh && e.weak ? "벗어났지만 거래량이 약해요" : fresh && e.dir !== "go" ? "아래로 이탈했어요" : pend && i >= last.length - 1 ? "옆으로 기는 중 · 위로 마감하면 롱" : null;
-          return withBadge(p, full ? "불) 셋업" : `불) ${KIND_KO[kinds[0]]}`, fresh && e !== good ? { kind: "rest", why: rest } : verdictOf(last, good, i, rest, { list: evs.filter(ok), note }), items);
+          return withBadge(p, full ? "불) 셋업" : `불) ${KIND_KO[kinds[0]]}`, fresh && e !== good ? { kind: "rest", why: rest } : verdictOf(last, good, i, rest, { list: evs.filter(ok), note }), items, statText(planned, outs, i));
         },
       };
     };
@@ -475,6 +522,8 @@ export function guideIndicators(T) {
         let atr = [];
         let hst = []; // 작은 봉 모드: 계획 봉의 국면 (봉별)
         let evs = [];
+        let planned = []; // 계획선을 그리는 신호 = 딱지 성적·자동 멈춤·주문선이 쓰는 신호
+        let outs = []; // planned마다 결과 {k, win}
         let info = null; // 지지·저항 요약 (맨 끝 봉)
         let dayLv = [];
         let zoneLv = []; // 아직 안 닿은 매물대 [{name, v}]
@@ -500,6 +549,8 @@ export function guideIndicators(T) {
         return {
           series: [...big.map((L) => L.s), ...small.map((L) => L.s)],
           prims: [lv],
+          tag: "비) 6선 자리",
+          signals: () => (trig ? planned : []),
           render(bars, from) {
             last = bars;
             const n = bars.length;
@@ -580,7 +631,9 @@ export function guideIndicators(T) {
                 const shorts = shift(S.findSixTriggers(S.flipBars(x.bars), S.neg(x.arrs[0]), S.neg(x.arrs[1]), x.arrs[2], lv2.map((L) => ({ name: L.name, vals: S.neg(L.vals) })), o), x.off).map(unflip);
                 evs = [...longs.filter((e) => p.both || hst[e.i] !== "down"), ...shorts.filter((e) => p.both || hst[e.i] !== "up")].sort((a, b) => a.i - b.i);
                 for (const e of evs) marks.push(mark(ctx, bars, e.i, !e.short, `${e.type} ${e.short ? "숏" : "롱"}`));
-                segs.push(...spanPlans(ctx, evs.map((e) => ({ ...e, targets: [{ label: e.type === "A" ? "익절 21선" : "익절 쌍고·쌍저", price: e.target }] })), n, p.lines));
+                const pl = spanPlans(ctx, bars, (planned = evs.map((e) => ({ ...e, targets: [{ label: e.type === "A" ? "익절 21선" : "익절 쌍고·쌍저", price: e.target }] }))), planN(p), (outs = planned.map((e) => outcomeOf(bars, e))));
+                segs.push(...pl.segs);
+                marks.push(...pl.marks);
               }
             }
             // 일봉 이평 (겹침 세기용): 끝난 일봉 값
@@ -610,7 +663,7 @@ export function guideIndicators(T) {
             const b = last[i];
             const st = stateAt(i);
             const items = [{ label: trig ? `6선 · ${baseName}봉 자리 + 진입 신호` : "6선 자리", value: "", color: inst.color }];
-            if (trig && !hst.length) return withBadge(p, "비)", { kind: "rest", why: "큰 봉을 읽는 중이에요…" }, items);
+            if (trig && !hst.length) return withBadge(p, "비)", { kind: "rest", why: "큰 봉을 읽는 중이에요…" }, items, statText(planned, outs, i));
             items.push({ label: st ? `${trig ? `${baseName}봉 ` : ""}${SIX_KO[st]}` : "국면 —", value: "", color: stColor(st) });
             const m7 = trig ? small[0].vals[i] : big[0].vals[i];
             if (b && m7 != null) {
@@ -628,7 +681,7 @@ export function guideIndicators(T) {
               items.push({ br: true }, { label: `최근: ${e.type} ${e.short ? "숏" : "롱"} (${e.lv})`, value: `${i - e.i}봉 전 · 손익비 ${rr == null ? "—" : rr.toFixed(1)}`, color: e.short ? downColor() : upColor() });
             }
             // 딱지: 큰 봉(계획)에서는 자리만 본다 → 늘 쉼. 신호는 작은 봉에서
-            return withBadge(p, "비)", trig ? verdictOf(last, e, i, e ? null : "가격이 자리에 안 왔어요", { list: evs }) : { kind: "rest", why: "여기서는 자리만 봐요 · 신호는 5분봉에서" }, items);
+            return withBadge(p, "비)", trig ? verdictOf(last, e, i, e ? null : "가격이 자리에 안 왔어요", { list: evs }) : { kind: "rest", why: "여기서는 자리만 봐요 · 신호는 5분봉에서" }, items, statText(planned, outs, i));
           },
         };
       },
@@ -665,12 +718,16 @@ export function guideIndicators(T) {
         let m200 = [];
         let atr = [];
         let evs = [];
+        let planned = []; // 계획선을 그리는 신호 = 딱지 성적·자동 멈춤·주문선이 쓰는 신호
+        let outs = []; // planned마다 결과 {k, win}
         let last = [];
         let gapArr = null; // 봉별 그날 갭 % (정규장이 있는 종목의 분봉만)
         const st = (i) => (last[i] ? S.e20State(last[i].c, m20[i], m20[i - 5], atr[i], p.flatK) : null);
         return {
           series: [s20, s200],
           prims: [bg, lv],
+          tag: "이) 20·200 눌림",
+          signals: () => planned,
           render(bars, from) {
             last = bars;
             const n = bars.length;
@@ -718,7 +775,9 @@ export function guideIndicators(T) {
             const gapOk = (e) => !gapArr || (gapArr[e.i] != null && (e.short ? gapArr[e.i] <= -p.gapMin : gapArr[e.i] >= p.gapMin));
             evs = [...longs, ...shorts].filter(gapOk).sort((a, b) => a.i - b.i);
             ctx.setMarkers(inst.uid, evs.map((e) => (e.ok ? mark(ctx, bars, e.i, !e.short, `눌림 ${e.rr.toFixed(1)}R`) : { ...mark(ctx, bars, e.i, !e.short, `손익비 ${e.rr.toFixed(1)}`, MUTE), shape: "circle", size: 0.5 })));
-            lv.setData(spanPlans(ctx, evs.filter((e) => e.ok).map((e) => ({ ...e, targets: [{ label: e.short ? "목표 직전 저점" : "목표 직전 고점", price: e.target }] })), n, p.lines));
+            const pl = spanPlans(ctx, bars, (planned = evs.filter((e) => e.ok).map((e) => ({ ...e, targets: [{ label: e.short ? "목표 직전 저점" : "목표 직전 고점", price: e.target }] }))), planN(p), (outs = planned.map((e) => outcomeOf(bars, e))));
+            lv.setData(pl.segs);
+            ctx.setMarkers(`${inst.uid}:res`, pl.marks);
           },
           legend(i) {
             const s = st(i);
@@ -739,7 +798,7 @@ export function guideIndicators(T) {
             if (e) items.push({ br: true }, { label: `최근: 눌림 ${e.short ? "숏" : "롱"}`, value: `${i - e.i}봉 전 · 되돌림 ${(e.ret * 100).toFixed(0)}% · 손익비 ${e.rr.toFixed(1)}`, color: e.short ? downColor() : upColor() });
             const far = b && m20[i] != null && atr[i] > 0 && Math.abs(b.c - m20[i]) / atr[i] > 3;
             const rest = s === "flat" ? "20선이 평평해요 (방향 없음)" : far ? "20선에서 너무 멀어요 (쫓아가지 않기)" : gapArr && (gapArr[i] == null || Math.abs(gapArr[i]) < p.gapMin) ? "오늘 갭이 작아요" : s === "mixed" ? "선 방향과 가격 위치가 달라요" : null;
-            return withBadge(p, "이)", verdictOf(last, e, i, rest, { list: evs.filter((x) => x.ok) }), items);
+            return withBadge(p, "이)", verdictOf(last, e, i, rest, { list: evs.filter((x) => x.ok) }), items, statText(planned, outs, i));
           },
         };
       },
@@ -795,6 +854,8 @@ export function guideIndicators(T) {
         let vw = [];
         let stage = [];
         let evs = [];
+        let planned = []; // 계획선을 그리는 신호 = 딱지 성적·자동 멈춤·주문선이 쓰는 신호
+        let outs = []; // planned마다 결과 {k, win}
         let last = [];
         const anchorIdx = (bars, key) => {
           const n = bars.length;
@@ -813,6 +874,8 @@ export function guideIndicators(T) {
         return {
           series: [s5, sv, s50, s200, ...anchors.map((a) => a.s)].filter(Boolean),
           prims: [lv],
+          tag: "섀) VWAP 스윙",
+          signals: () => planned,
           render(bars, from) {
             last = bars;
             const n = bars.length;
@@ -848,7 +911,9 @@ export function guideIndicators(T) {
             const x = win(bars, ma5, atr);
             evs = shift(S.findFirstHH(x.bars, x.arrs[0], x.arrs[1], { tick: tickOf(ctx) }), x.off).filter((e) => daily || !p.vwf || vw[e.i] == null || bars[e.i].c > vw[e.i]);
             ctx.setMarkers(inst.uid, evs.map((e) => mark(ctx, bars, e.i, true, stage[e.i] === 4 ? "HH (4단계 · 사지 않기)" : "첫 HH", stage[e.i] === 4 ? MUTE : undefined)));
-            lv.setData(spanPlans(ctx, evs.filter((e) => stage[e.i] !== 4).map((e) => ({ ...e, targets: rTargets(e, [[1, "1R (1/3 덜기)"], [2, "2R"]]) })), n, p.lines));
+            const pl = spanPlans(ctx, bars, (planned = evs.filter((e) => stage[e.i] !== 4).map((e) => ({ ...e, targets: rTargets(e, [[1, "1R (1/3 덜기)"], [2, "2R"]]) }))), planN(p), (outs = planned.map((e) => outcomeOf(bars, e))));
+            lv.setData(pl.segs);
+            ctx.setMarkers(`${inst.uid}:res`, pl.marks);
           },
           legend(i) {
             const b = last[i];
@@ -865,7 +930,7 @@ export function guideIndicators(T) {
             // 딱지: 이 지표는 롱 자리만 찾는다. 일봉이 내리는 단계(4단계)의 신호는 후보가 아니다
             const e = lastOf(evs.filter((x) => x.i <= i && stage[x.i] !== 4));
             const rest = stage[i] === 4 ? "일봉이 내리는 중이에요 (사지 않기)" : b && ma5[i] != null && b.c < ma5[i] ? "가격이 5일선 아래예요" : !daily && b && vw[i] != null && b.c < vw[i] ? "가격이 오늘 VWAP 아래예요" : null;
-            return withBadge(p, "섀)", verdictOf(last, e, i, rest, { list: evs.filter((x) => stage[x.i] !== 4) }), items);
+            return withBadge(p, "섀)", verdictOf(last, e, i, rest, { list: evs.filter((x) => stage[x.i] !== 4) }), items, statText(planned, outs, i));
           },
         };
       },
@@ -894,11 +959,15 @@ export function guideIndicators(T) {
         let ema = [];
         let st = [];
         let evs = [];
+        let planned = []; // 계획선을 그리는 신호 = 딱지 성적·자동 멈춤·주문선이 쓰는 신호
+        let outs = []; // planned마다 결과 {k, win}
         let legs = 0;
         let last = [];
         return {
           series: [sE],
           prims: [lv],
+          tag: "브) 봉 읽기",
+          signals: () => planned,
           render(bars, from) {
             last = bars;
             const n = bars.length;
@@ -937,7 +1006,9 @@ export function guideIndicators(T) {
                 return mark(ctx, bars, e.i, !e.short, text, e.warn ? MUTE : e.hit === false ? hexA(base, 0.4) : base);
               })
             );
-            const segs = spanPlans(ctx, evs.filter((e) => e.hit !== false && !e.warn).map((e) => ({ ...e, targets: [{ label: e.range ? "목표 (반대쪽 1/3)" : `목표 ${p.rr}R`, price: e.target }] })), n, p.lines);
+            const pl = spanPlans(ctx, bars, (planned = evs.filter((e) => e.hit !== false && !e.warn).map((e) => ({ ...e, targets: [{ label: e.range ? "목표 (반대쪽 1/3)" : `목표 ${p.rr}R`, price: e.target }] }))), planN(p), (outs = planned.map((e) => outcomeOf(bars, e))));
+            const segs = pl.segs;
+            ctx.setMarkers(`${inst.uid}:res`, pl.marks);
             if (n && st[n - 1] === 0) {
               const z = S.rangeZone(bars, n, p.rangeLen);
               if (z) {
@@ -963,7 +1034,7 @@ export function guideIndicators(T) {
             if (g && i === g.i) v = { kind: g.short ? "short" : "long", why: `다음 봉이 진입선을 넘으면 들어가요${failedHere(last, live, g) ? " · 조심: 같은 자리에서 방금 실패했어요" : ""}` };
             else if (g && g.hit === false && i - g.i <= FRESH) v = { kind: "rest", why: "방금 신호는 취소됐어요 (진입선을 못 넘음)" };
             else v = verdictOf(last, g, i, i >= last.length - 1 && legs >= 3 ? `${legs}번째 다리예요 (새로 안 들어가기)` : null, { list: live });
-            return withBadge(p, "브)", v, items);
+            return withBadge(p, "브)", v, items, statText(planned, outs, i));
           },
         };
       },

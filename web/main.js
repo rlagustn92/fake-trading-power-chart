@@ -429,6 +429,36 @@ const replay = createReplay($("#replaybar"), {
   onStep: (cell, t, prev) => trading?.onStep(cell, t, prev),
   onStop: (cell, t) => trading?.onStop(cell, t),
   confirmEnd: (what, proceed) => guardTrading(null, what, proceed), // 🎲·📍 새로 시작, ✕ 끝내기·Esc (0.13.0)
+  // 자동 멈춤 (0.23.0): 이번에 끝난 봉에 매매 방식 지표의 롱·숏 후보 신호 · 이 종목에 켜 둔 알림 조건이 있으면 그 이유 글자
+  checkStop: (cell, prev, t) => {
+    const ks = cell?.replayClosedBars?.(prev, t) ?? [];
+    if (!ks.length) return null;
+    const why = [];
+    let plan = null; // 📝 주문선 놓기: 첫 신호의 진입·손절·가장 가까운 익절
+    if (cfg.chart.replay_stop_sig ?? true)
+      for (const s of cell.guideSignalsOn(ks)) {
+        why.push(`${s.tag} ${s.short ? "▼ 숏 후보" : "▲ 롱 후보"}`);
+        const e = s.ev;
+        if (!plan && e?.entry != null && e?.stop != null) {
+          const side = e.entry > e.stop ? 1 : -1;
+          const tps = (e.targets ?? []).map((x) => x?.price).filter((v) => v != null && Number.isFinite(v) && side * (v - e.entry) > 0);
+          plan = { side, entry: e.entry, stop: e.stop, tp: tps.length ? (side > 0 ? Math.min(...tps) : Math.max(...tps)) : null, tag: s.tag };
+        }
+      }
+    if (cfg.chart.replay_stop_alert ?? true) {
+      try {
+        for (const a of alerts.replayHits(cell.cc.symbol, cell.tf, cell.info, cell.bars, ks)) why.push(`🔔 ${alertText(a)}`);
+      } catch (e) {
+        console.warn("[replay] 알림 확인 실패", e);
+      }
+    }
+    return why.length ? { text: `⏸ 멈춤 · ${why.join(" · ")}`, plan } : null;
+  },
+  onPlan: (pl) => trading?.placePlan(pl),
+  stakeOf: () => {
+    const s = trading?.stake;
+    return s ? `${s.holding ?? ""}|${s.pending}` : "";
+  },
 });
 
 trading = await createTrading($("#trade"), { cfg, grid, replay, toast, journalRoot: $("#journal"), onToggle: (on) => toolbar.tradeBtn.classList.toggle("on", on) });

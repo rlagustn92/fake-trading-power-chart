@@ -494,11 +494,15 @@ table.keys td { padding: 6px 12px 6px 0; font-size: 16px; }
 /* ▶ 바 리플레이 */
 #replaybar { display: flex; align-items: center; gap: 8px; padding: 4px 8px; background: #1a1630; border-bottom: 1px solid #3b2f6b; font-size: 16px; overflow-x: auto; scrollbar-width: none; }
 #replaybar[hidden] { display: none; }
+#replaybar > * { flex-shrink: 0; } /* 0.23.0: 버튼이 늘어 좁은 창에서 글자가 찌그러지지 않게 → 옆으로 밀어 보기 */
+#replaybar > .grow { flex-shrink: 1; }
 #replaybar button { min-height: 42px; font-size: 16px; }
 #replaybar.picking { background: #2a2350; }
 .rp-title { font-weight: 800; color: #c9b8ff; white-space: nowrap; }
 .rp-status { font-weight: 700; color: #ffb020; white-space: nowrap; min-width: 180px; }
 .rp-play { min-width: 110px; font-weight: 800; }
+.rp-plan { background: #3b2f6b; border-color: #c9b8ff; font-weight: 800; white-space: nowrap; }
+.rp-plan[hidden] { display: none; }
 .rp-label { color: var(--muted); font-size: 14px; }
 .rp-speed .seg button { min-width: 64px; padding: 0 8px; }
 #grid.rp-picking .cell-body canvas { cursor: pointer !important; }

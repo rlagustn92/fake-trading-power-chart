@@ -452,6 +452,29 @@ export async function createTrading(root, { cfg, grid, replay, toast, onToggle, 
     paint();
   }
 
+  /**
+   * 신호로 주문선 놓기 (0.23.0, 사용자: 자동 멈춤에서 바로): 매매 방식 지표 신호의 진입·손절·익절 가격에 대기선을 깐다.
+   * 롱·숏은 신호 방향. 깐 뒤에는 보통 대기선과 같다 (끌어서 옮기기·오른쪽 클릭으로 끄기·취소). 수량은 체결 때 지금 설정(금액·손절 기준)대로.
+   * 익절·손절선은 내가 직접 고른 계획이라 켠 채로 깐다
+   */
+  function placePlan(pl) {
+    if (!ses) return toast("리플레이나 📡 실시간을 켜야 선을 깔 수 있어요");
+    const side = pl.side > 0 ? 1 : -1;
+    if (pos) return toast(`${pos.side > 0 ? "롱" : "숏"}을 들고 있어서 새 신호 주문선은 못 깔아요 · 정리한 뒤에 다시 눌러 주세요`, 4000);
+    const c = cur();
+    if (c == null) return;
+    const k = tick();
+    const price = E.roundTick(pl.entry, k);
+    pend = { side, price, type: E.pendingType(side, price, c), add: false, tpOn: true, slOn: true, sl: E.roundTick(pl.stop, k), tp: pl.tp != null ? E.roundTick(pl.tp, k) : null, tag: pl.tag };
+    if (pend.tp == null) {
+      // 신호에 익절가가 없으면 보통 대기선처럼 깔고 꺼 둔다
+      pend.tp = E.roundTick(price * (1 + side * R().tp), k);
+      pend.tpOn = false;
+    }
+    toast(`${pl.tag} ${side > 0 ? "롱" : "숏"} 주문선을 깔았어요 · 진입 ${px(price)} · 손절 ${px(pend.sl)}${pend.tp != null ? ` · 익절 ${px(pend.tp)}` : ""}\n선을 끌어 옮기거나 💰 창에서 취소할 수 있어요`, 5000);
+    paint();
+  }
+
   function cancelPending() {
     if (!pend) return;
     pend = null;
@@ -1116,6 +1139,7 @@ export async function createTrading(root, { cfg, grid, replay, toast, onToggle, 
     enter,
     closeNow,
     setLevel,
+    placePlan,
     lines,
   };
 }
