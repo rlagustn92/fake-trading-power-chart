@@ -76,6 +76,44 @@ const rTargets = (ev, list) => {
 const linesParam = { key: "lines", label: "계획선 그릴 신호 수", def: 2, min: 0, max: 10, tip: "가장 최근 신호 몇 개까지 진입·손절·익절 선을 그릴지\n0이면 화살표만" };
 const shortsParam = { key: "shorts", label: "숏 신호도", def: true, type: "bool" };
 
+// ── 딱지 (0.22.0, 사용자: "롱이면 롱, 쉬라면 쉬라는 화끈한 표시가 부족 · 그 외 글자는 잘 모르겠다") ──
+// 범례 맨 앞에 '▲ 롱 후보 · ▼ 숏 후보 · 쉼' 한 줄. 자세한 글자는 기본으로 숨긴다 (detail을 켜면 보임)
+const FRESH = 3; // 신호가 나온 봉부터 이만큼의 봉까지만 '후보'. 그 뒤는 늦은 것 → 쉼
+const detailParam = { key: "detail", label: "자세한 글자도 보기", def: false, type: "bool", tip: "끄면(기본): 왼쪽 위에 '롱 후보 · 숏 후보 · 쉼' 딱지 한 줄만 보여요\n켜면: 이평 값·국면·최근 신호 같은 자세한 글자도 같이 보여요" };
+const BADGE_KO = { long: "▲ 롱 후보", short: "▼ 숏 후보", rest: "쉼" };
+/**
+ * 딱지 정하기. e = i번 봉까지의 가장 최근 유효 신호 ({i, short, entry, stop}), rest = 신호가 없을 때의 이유 (없으면 기본 문구)
+ * 후보 = 신호가 FRESH봉 안이고, 그 뒤 손절선에 닿은 적이 없다. i번 봉까지만 본다 (미래 봉 안 봄)
+ */
+function verdictOf(bars, e, i, rest, opt) {
+  if (e && i >= e.i && i - e.i <= FRESH) {
+    let stopped = false;
+    if (e.stop != null) for (let k = e.i + 1; k <= i && bars[k]; k++) if (e.short ? bars[k].h >= e.stop : bars[k].l <= e.stop) stopped = true;
+    if (stopped) return { kind: "rest", why: "방금 신호는 손절선에 닿았어요" };
+    const warn = opt && failedHere(bars, opt.list, e) ? " · 조심: 같은 자리에서 방금 실패했어요" : "";
+    return { kind: e.short ? "short" : "long", why: `${i === e.i ? "방금 조건이 맞았어요" : `${i - e.i}봉 전에 조건이 맞았어요`}${opt?.note ?? ""}${warn}` };
+  }
+  return { kind: "rest", why: rest ?? (e ? `마지막 신호가 ${i - e.i}봉 전이라 늦었어요` : "조건이 맞는 자리가 없어요") };
+}
+/**
+ * 같은 자리 재실패 (강의: "같은 가격 재터치에서 반등 실패면 두 번째엔 조심"): 지금 신호의 진입가 근처(손절 거리 1배 안, 제가 정한 값)에서
+ * 최근 60봉 안에 같은 방향 신호가 손절선에 닿았으면 참. 신호를 막지는 않고 딱지 이유에 '조심'만 붙인다. e.i번 봉 전까지만 본다
+ */
+export function failedHere(bars, list, e) {
+  if (!list || e.stop == null || e.entry == null) return false;
+  const tol = Math.abs(e.entry - e.stop);
+  return list.some((x) => {
+    if (x.i >= e.i || e.i - x.i > 60 || !!x.short !== !!e.short || x.stop == null || Math.abs(x.entry - e.entry) > tol) return false;
+    for (let k = x.i + 1; k < e.i && bars[k]; k++) if (x.short ? bars[k].h >= x.stop : bars[k].l <= x.stop) return true;
+    return false;
+  });
+}
+/** 범례 맨 앞에 딱지를 붙인다. v = {kind, why, text?} */
+function withBadge(p, tag, v, items) {
+  const head = { badge: v.kind, label: `${tag} ${v.text ?? BADGE_KO[v.kind]}`, value: v.why };
+  return p.detail ? [head, { br: true }, ...items] : [head];
+}
+
 const SIX = [
   { n: 7, color: "#ff8a3d" },
   { n: 21, color: "#b18cff" },
@@ -115,6 +153,8 @@ export function guideIndicators(T) {
       let m200 = [];
       let evs = [];
       let pend = null;
+      let bigOrd = []; // 큰 봉의 50·200 배열 (up·down), 차트 봉마다
+      let atrArr = [];
       let last = [];
       const o = () => ({ tight: p.tight, impK: p.impK });
       return {
@@ -135,17 +175,34 @@ export function guideIndicators(T) {
             paintLine(sVw, bars, vw, ctx.time, from);
           }
           const atr = C.atr(bars, 14);
+          atrArr = atr;
+          // 큰 봉 방향: 끝난 큰 봉의 50·200 배열 (미래 봉 안 봄 — mapHtf는 계단식)
+          bigOrd = [];
+          if (p.big && tfMode(p.big, ctx.tf) === "htf") {
+            const hb = ctx.htf(p.big);
+            if (hb) {
+              const hc = closes(hb);
+              const h50 = C.sma(hc, 50);
+              const h200 = C.sma(hc, 200);
+              bigOrd = mapHtf(bars, hb, hc.map((_, k) => S.s50Order(h50[k], h200[k])), htfOpt(ctx, p.big));
+            }
+          }
           const x = win(bars, m50, atr);
           // 거래량 확인: 벗어나는 봉의 거래량이 앞 20봉 평균의 몇 배인지. 기준에 못 미치면 "거래량 약함"(회색, 계획선 없음)
           evs = shift(S.findSetups(x.bars, x.arrs[0], x.arrs[1], o()), x.off)
             .filter((e) => kinds.includes(e.kind))
             .map((e) => {
               const vr = hasVol ? S.volRatio(bars, e.i) : null;
-              return { ...e, vr, weak: e.dir === "go" && p.volK > 0 && vr != null && vr < p.volK };
+              // 손절 기준 (0.22.0 2차 검수): 강의의 ㄴ자 손절은 "기준선(50선) 종가 이탈". 자동 = ㄴ자는 이평선, 권총은 횡보 구간 아래
+              // 진입가에 너무 붙으면 손절이 0에 가까워져서 최소 0.3 ATR은 띄운다 (제가 정한 값)
+              let stop = e.stop;
+              const byMa = p.stopBy === "ma" || (p.stopBy !== "base" && e.kind === "lshape");
+              if (e.dir === "go" && byMa && m50[e.i] != null && m50[e.i] < e.entry) stop = Math.min(m50[e.i], e.entry - 0.3 * (atr[e.i] ?? 0));
+              return { ...e, stop, vr, weak: e.dir === "go" && p.volK > 0 && vr != null && vr < p.volK, against: e.dir === "go" && e.kind === "pistol" && bigOrd[e.i] === "down" };
             });
           const pd = S.pendingSetup(x.bars, x.arrs[0], x.arrs[1], o());
           pend = pd && kinds.includes(pd.kind) ? shift([pd], x.off)[0] : null;
-          const marks = evs.map((e) => mark(ctx, bars, e.i, e.dir === "go", `${KIND_KO[e.kind]} ${e.dir === "go" ? "▲" : "이탈"}${e.weak ? " 거래량 약함" : e.vr != null && e.dir === "go" ? ` 거래량×${e.vr.toFixed(1)}` : ""}`, e.weak ? MUTE : undefined));
+          const marks = evs.map((e) => mark(ctx, bars, e.i, e.dir === "go", `${KIND_KO[e.kind]} ${e.dir === "go" ? "▲" : "이탈"}${e.against ? " 큰 봉 역배열" : e.weak ? " 거래량 약함" : e.vr != null && e.dir === "go" ? ` 거래량×${e.vr.toFixed(1)}` : ""}`, e.weak || e.against ? MUTE : undefined));
           // 골든크로스·데드크로스 (50선이 200선을 넘는 봉): 사이클이 다시 시작되거나 꺾이는 자리
           if (sSlow) {
             for (let i = Math.max(1, bars.length - LIM); i < bars.length; i++) {
@@ -156,7 +213,7 @@ export function guideIndicators(T) {
             }
           }
           ctx.setMarkers(inst.uid, marks);
-          const go = evs.filter((e) => e.dir === "go" && !e.weak).map((e) => ({
+          const go = evs.filter((e) => e.dir === "go" && !e.weak && !e.against).map((e) => ({
             ...e,
             targets:
               e.kind === "lshape"
@@ -192,7 +249,15 @@ export function guideIndicators(T) {
             const b = last[i];
             if (e.dir === "go" && !e.weak && b && i - e.i >= 6 && b.c > e.stop && b.c < e.entry + (e.entry - e.stop)) items.push({ br: true }, { label: `${i - e.i}봉째 반응 없음 → 시간 손절(본전 정리) 고려`, value: "", color: STOP });
           } else items.push({ label: "최근 신호 없음", value: "", color: "#a0a6ae" });
-          return items;
+          // 딱지: 거래량까지 맞은 '벗어남'만 후보. 이 지표는 롱 자리만 찾는다
+          const ok = (x) => x.dir === "go" && !x.weak && !x.against;
+          const good = lastOf(evs.filter((x) => x.i <= i && ok(x)));
+          const fresh = e && i - e.i <= FRESH;
+          // 50·200 간격 (강의: 간격이 크게 벌어진 급락 뒤 반등이 크다). 기준 5·2 ATR은 제가 정한 값
+          const gapK = good && good.kind === "lshape" && m200[good.i] != null && atrArr[good.i] > 0 ? (m200[good.i] - m50[good.i]) / atrArr[good.i] : null;
+          const note = gapK == null ? "" : gapK >= 5 ? " · 50·200 간격 큼 (반등 여지 큼)" : gapK < 2 ? " · 50·200 간격 작음 (반등 여지 작음)" : "";
+          const rest = fresh && e.against ? `${ctx.tfName(p.big)}이 역배열이에요 (큰 방향 반대)` : fresh && e.weak ? "벗어났지만 거래량이 약해요" : fresh && e.dir !== "go" ? "아래로 이탈했어요" : pend && i >= last.length - 1 ? "옆으로 기는 중 · 위로 마감하면 롱" : null;
+          return withBadge(p, full ? "불) 셋업" : `불) ${KIND_KO[kinds[0]]}`, fresh && e !== good ? { kind: "rest", why: rest } : verdictOf(last, good, i, rest, { list: evs.filter(ok), note }), items);
         },
       };
     };
@@ -202,10 +267,53 @@ export function guideIndicators(T) {
     { key: "tight", label: "횡보 폭 기준", def: 1, min: 0.5, max: 3, step: 0.1, tip: "'옆으로 좁게 긴다'의 기준이에요 (제가 정한 값)\n1 = 기본. 키우면 조금 넓은 횡보도 잡고(신호 많아짐), 줄이면 아주 좁은 것만 잡아요" },
     { key: "impK", label: "직전 움직임 크기", def: 5, min: 2, max: 20, step: 0.5, tip: "횡보 앞의 급등·급락이 평소 한 봉 폭(ATR)의 몇 배 이상이어야 하는지 (제가 정한 값)\n키우면 아주 강한 움직임 뒤만 잡아요" },
     { key: "volK", label: "거래량 확인 배수", def: 1.5, min: 0, max: 10, step: 0.1, tip: "벗어나는 봉의 거래량이 앞 20봉 평균의 이 배수 이상이어야 신호로 쳐요 (배수는 제가 정한 값)\n못 미치면 '거래량 약함'(회색)으로만 표시하고 계획선은 안 그려요\n0이면 거래량을 안 봐요. 거래량이 없는 종목은 자동으로 건너뛰어요" },
-    linesParam,
+    { key: "stopBy", label: "손절 기준", def: "auto", type: "select", options: [["auto", "자동 (ㄴ자 = 이평선 · 권총 = 횡보 아래)"], ["ma", "이평선 아래"], ["base", "횡보 구간 아래"]], tip: "강의의 ㄴ자 손절은 '봉이 기준 이평선(50선) 아래에서 끝나면'이에요 → 자동이면 ㄴ자는 이평선에 손절선을 그려요\n꼬리로 잠깐 닿는 것은 손절이 아니에요 (봉 마감 기준)\n권총은 횡보 구간 아래(단기 저점)가 기본이에요" },
+    { key: "big", label: "큰 봉 방향 확인", def: "1h", type: "select", options: [["", "안 함"], ["1h", "1시간봉"], ["4h", "4시간봉"], ["1D", "일봉"]], tip: "권총은 상승장 매매예요. 큰 봉의 50선이 200선 아래(역배열)면 권총 롱 신호를 회색 '큰 봉 역배열'로만 표시하고 계획선은 안 그려요\n강의 사례: 셋업대로 들어갔는데 큰 방향이 반대라 실패\nㄴ자는 원래 하락 뒤 반등 매매라 거르지 않아요\n차트 봉이 이 봉보다 크거나 같으면 적용 안 해요" },
+    linesParam, detailParam,
   ];
 
   return {
+    // ── 자동 피보 (0.22.0, 사용자: "피보 자동으로 안 됨? · 0.25 단위로 쓰는 사람도 있더라") ──
+    // 최근 N봉의 가장 큰 움직임(최저 저가 ↔ 최고 고가)에 되돌림 선을 긋는다. 신호는 안 낸다 (딱지 없음)
+    autofib: {
+      short: "자동 피보",
+      pane: "price",
+      noColor: true,
+      params: [
+        { key: "look", label: "찾는 봉 수", def: 120, min: 20, max: 2000, step: 10, tip: "최근 이만큼의 봉에서 가장 높은 곳과 가장 낮은 곳을 찾아 이어요 (제가 정한 값)\n키우면 더 큰 움직임을, 줄이면 최근의 작은 움직임을 잡아요" },
+        { key: "unit", label: "단위", def: "std", type: "select", options: [["std", "기본 (23.6 · 38.2 · 50 · 61.8 · 78.6)"], ["q", "0.25 (25 · 50 · 75)"]] },
+      ],
+      color: "#a0a6ae",
+      make(ctx, inst) {
+        const p = inst.params;
+        const lv = new Levels();
+        ctx.attach(lv);
+        const STD = [[0, "#a0a6ae"], [0.236, "#ff4d4f"], [0.382, "#ff8a3d"], [0.5, "#4cd5a0"], [0.618, "#5ec8d8"], [0.786, "#3d8bff"], [1, "#a0a6ae"]];
+        const QTR = [[0, "#a0a6ae"], [0.25, "#ff8a3d"], [0.5, "#4cd5a0"], [0.75, "#3d8bff"], [1, "#a0a6ae"]];
+        const pct = (v) => `${(v * 100).toFixed(1).replace(/\.0$/, "")}%`;
+        let f = null;
+        let last = [];
+        return {
+          series: [],
+          prims: [lv],
+          render(bars) {
+            last = bars;
+            f = bars.length ? S.autoFib(bars, p.look) : null;
+            lv.setData(f ? (p.unit === "q" ? QTR : STD).map(([k, c]) => ({ from: f.from, to: null, price: f.price(k), color: c, dash: k > 0 && k < 1, label: `${pct(k)} ${ctx.fmt(f.price(k))}` })) : []);
+          },
+          legend(i) {
+            const b = last[i];
+            if (!f || !b) return [{ label: "자동 피보", value: "—", color: inst.color }];
+            const back = f.up ? (f.H - b.c) / (f.H - f.L) : (b.c - f.L) / (f.H - f.L);
+            return [
+              { label: `자동 피보 · ${f.up ? "오른" : "내린"} 움직임`, value: `${ctx.fmt(f.up ? f.L : f.H)} → ${ctx.fmt(f.up ? f.H : f.L)}`, color: f.up ? upColor() : downColor() },
+              { label: "지금", value: back < 0 ? "움직임을 넘어섰어요" : back > 1 ? "전부 되돌렸어요 (움직임 무효)" : `${pct(back)} 되돌림`, color: "#c9ced6" },
+            ];
+          },
+        };
+      },
+    },
+
     // ── 공통 1. 손익 계획선 ──
     rplan: {
       short: "계획선",
@@ -275,7 +383,7 @@ export function guideIndicators(T) {
     regime: {
       short: "신호등",
       pane: "sub",
-      params: [{ key: "tf", label: "기준 봉", def: "", type: "tf" }],
+      params: [{ key: "tf", label: "기준 봉", def: "", type: "tf" }, detailParam],
       color: "#f5c542",
       make(ctx, inst) {
         const p = inst.params;
@@ -328,7 +436,8 @@ export function guideIndicators(T) {
               items.push({ label: `${name} ${v > 0 ? "▲" : v < 0 ? "▼" : "–"}`, value: "", color: v > 0 ? upColor() : v < 0 ? downColor() : "#a0a6ae" });
             }
             items.push({ label: up >= 4 ? `→ 롱 쪽 ${up}/5` : dn >= 4 ? `→ 숏 쪽 ${dn}/5` : `→ 엇갈림 (롱 ${up} · 숏 ${dn}) 쉬는 쪽`, value: "", color: up >= 4 ? upColor() : dn >= 4 ? downColor() : "#a0a6ae" });
-            return items;
+            const v = up >= 4 ? { kind: "long", text: "▲ 롱 쪽", why: `다섯 방식 중 ${up}개가 롱` } : dn >= 4 ? { kind: "short", text: "▼ 숏 쪽", why: `다섯 방식 중 ${dn}개가 숏` } : { kind: "rest", why: `방식들이 엇갈려요 (롱 ${up} · 숏 ${dn})` };
+            return withBadge(p, `공)${tag}`, v, items);
           },
         };
       },
@@ -347,7 +456,7 @@ export function guideIndicators(T) {
         { key: "zones", label: "매물대(자동·참고)", def: true, type: "bool", tip: "여러 봉이 같은 값에서 막히던 좁은 구간을 몸통 큰 봉이 뚫은 자리 = 손바뀜 자리(저항 → 지지, 지지 → 저항)\n아직 다시 안 닿은 것만 주황 선으로 그려요 (첫 리테스트가 가장 세다)\n기계가 찾은 근사치예요. 직접 그은 매물대가 더 정확해요" },
         { key: "daily", label: "일봉 이평 겹침 세기", def: true, type: "bool", tip: "지지·저항 자리에 일봉 이평선(21·60·120·224·365)이 같이 있으면 '근거 겹침'으로 세요" },
         { key: "both", label: "큰 방향 반대 신호도", def: false, type: "bool", tip: "끄면(기본): 계획 봉이 정배열이면 롱 신호만, 역배열이면 숏 신호만 보여요" },
-        linesParam,
+        linesParam, detailParam,
         { key: "tags", label: "눈금에 이름표", def: true, type: "bool" },
         { key: "fit", label: "선 때문에 화면 안 늘림", def: true, type: "bool", tip: "켜면(기본): 멀리 있는 선(224·365) 때문에 캔들이 납작해지지 않아요. 대신 화면 밖 선은 안 보여요" },
       ],
@@ -501,7 +610,7 @@ export function guideIndicators(T) {
             const b = last[i];
             const st = stateAt(i);
             const items = [{ label: trig ? `6선 · ${baseName}봉 자리 + 진입 신호` : "6선 자리", value: "", color: inst.color }];
-            if (trig && !hst.length) return [...items, { label: "계획 봉을 읽는 중…", value: "", color: "#a0a6ae" }];
+            if (trig && !hst.length) return withBadge(p, "비)", { kind: "rest", why: "큰 봉을 읽는 중이에요…" }, items);
             items.push({ label: st ? `${trig ? `${baseName}봉 ` : ""}${SIX_KO[st]}` : "국면 —", value: "", color: stColor(st) });
             const m7 = trig ? small[0].vals[i] : big[0].vals[i];
             if (b && m7 != null) {
@@ -518,7 +627,8 @@ export function guideIndicators(T) {
               const rr = S.rrOf(e.entry, e.stop, e.target);
               items.push({ br: true }, { label: `최근: ${e.type} ${e.short ? "숏" : "롱"} (${e.lv})`, value: `${i - e.i}봉 전 · 손익비 ${rr == null ? "—" : rr.toFixed(1)}`, color: e.short ? downColor() : upColor() });
             }
-            return items;
+            // 딱지: 큰 봉(계획)에서는 자리만 본다 → 늘 쉼. 신호는 작은 봉에서
+            return withBadge(p, "비)", trig ? verdictOf(last, e, i, e ? null : "가격이 자리에 안 왔어요", { list: evs }) : { kind: "rest", why: "여기서는 자리만 봐요 · 신호는 5분봉에서" }, items);
           },
         };
       },
@@ -539,7 +649,7 @@ export function guideIndicators(T) {
         { key: "gapMin", label: "갭 최소 % (주식 분봉)", def: 1, min: 0, max: 20, step: 0.5, tip: "꼭 있어야 하는 조건 '의미 있는 갭': 그날 시가가 전날 종가보다 이만큼 이상 높게(숏은 낮게) 시작한 날만 신호를 내요\n몇 %가 '의미 있는'지는 강의에 없어서 제가 1%로 정했어요\n정규장이 있는 종목(주식)의 분봉에만 적용돼요. 0이면 갭을 안 봐요" },
         shortsParam,
         { key: "bg", label: "평평한 구간 회색", def: true, type: "bool" },
-        linesParam,
+        linesParam, detailParam,
       ],
       color: "#3d8bff",
       make(ctx, inst) {
@@ -627,7 +737,9 @@ export function guideIndicators(T) {
             if (gapArr) items.push({ label: gapArr[i] == null ? "갭 —" : `오늘 갭 ${sgn(gapArr[i])}${Math.abs(gapArr[i]) >= p.gapMin ? "" : " (작음 → 신호 없음)"}`, value: "", color: "#a0a6ae" });
             const e = lastOf(evs.filter((x) => x.i <= i && x.ok));
             if (e) items.push({ br: true }, { label: `최근: 눌림 ${e.short ? "숏" : "롱"}`, value: `${i - e.i}봉 전 · 되돌림 ${(e.ret * 100).toFixed(0)}% · 손익비 ${e.rr.toFixed(1)}`, color: e.short ? downColor() : upColor() });
-            return items;
+            const far = b && m20[i] != null && atr[i] > 0 && Math.abs(b.c - m20[i]) / atr[i] > 3;
+            const rest = s === "flat" ? "20선이 평평해요 (방향 없음)" : far ? "20선에서 너무 멀어요 (쫓아가지 않기)" : gapArr && (gapArr[i] == null || Math.abs(gapArr[i]) < p.gapMin) ? "오늘 갭이 작아요" : s === "mixed" ? "선 방향과 가격 위치가 달라요" : null;
+            return withBadge(p, "이)", verdictOf(last, e, i, rest, { list: evs.filter((x) => x.ok) }), items);
           },
         };
       },
@@ -662,7 +774,7 @@ export function guideIndicators(T) {
         { key: "alo", label: "앵커: 최근 큰 저점", def: true, type: "bool", tip: "바닥 이후 산 사람들의 평균 단가 → 눌림의 지지가 되기 쉬워요" },
         { key: "look", label: "고점·저점 찾는 봉 수", def: 250, min: 30, max: 2000, step: 10 },
         { key: "vwf", label: "VWAP 위에서만 신호", def: true, type: "bool", tip: "분봉에서: 종가가 그날 VWAP 위일 때만 진입 신호를 내요 (VWAP 아래 반등은 믿지 않는다)" },
-        linesParam,
+        linesParam, detailParam,
       ],
       color: "#f5c542",
       make(ctx, inst) {
@@ -750,7 +862,10 @@ export function guideIndicators(T) {
             }
             if (!daily && b && vw[i] != null) items.push({ br: true }, { label: "VWAP", value: `${ctx.fmt(vw[i])} · ${b.c >= vw[i] ? "위 (오늘 매수자 주도)" : "아래 (오늘 매도자 주도)"}`, color: "#ff6fae" });
             for (const a of anchors) if (a.vals[i] != null) items.push({ br: true }, { label: a.name, value: `${ctx.fmt(a.vals[i])}${b ? ` · 가격이 ${b.c >= a.vals[i] ? "위" : "아래"}` : ""}`, color: a.color });
-            return items;
+            // 딱지: 이 지표는 롱 자리만 찾는다. 일봉이 내리는 단계(4단계)의 신호는 후보가 아니다
+            const e = lastOf(evs.filter((x) => x.i <= i && stage[x.i] !== 4));
+            const rest = stage[i] === 4 ? "일봉이 내리는 중이에요 (사지 않기)" : b && ma5[i] != null && b.c < ma5[i] ? "가격이 5일선 아래예요" : !daily && b && vw[i] != null && b.c < vw[i] ? "가격이 오늘 VWAP 아래예요" : null;
+            return withBadge(p, "섀)", verdictOf(last, e, i, rest, { list: evs.filter((x) => stage[x.i] !== 4) }), items);
           },
         };
       },
@@ -768,7 +883,7 @@ export function guideIndicators(T) {
         { key: "rangeLen", label: "레인지 길이(봉)", def: 40, min: 10, max: 300, step: 5 },
         { key: "all", label: "취소·경고 신호도 표시", def: false, type: "bool", tip: "켜면: 다음 봉이 진입가를 못 넘어 취소된 신호(흐린 화살표)와 3번째 다리 경고(회색)도 보여요" },
         shortsParam,
-        linesParam,
+        linesParam, detailParam,
       ],
       color: "#f5c542",
       make(ctx, inst) {
@@ -841,7 +956,14 @@ export function guideIndicators(T) {
             if (i >= last.length - 1 && legs) items.push({ label: legs >= 3 ? `${legs}번째 다리 → 새로 들어가지 않기` : `${legs}번째 다리`, value: "", color: legs >= 3 ? STOP : "#a0a6ae" });
             const e = lastOf(evs.filter((x) => x.i <= i));
             if (e) items.push({ br: true }, { label: `최근: ${e.range ? "레인지" : `${e.short ? "L" : "H"}${e.n}`} ${e.short ? "숏" : "롱"}`, value: `${i - e.i}봉 전 · ${e.hit === false ? "다음 봉이 안 넘어 취소" : e.hit ? "다음 봉에서 진입가 넘음" : "다음 봉이 넘으면 진입"}`, color: e.short ? downColor() : upColor() });
-            return items;
+            // 딱지: 경고(3번째 다리)는 후보가 아니다. 신호 봉에서는 아직 진입 전 → "다음 봉이 진입선을 넘으면". 다음 봉이 못 넘으면 취소
+            const g = lastOf(evs.filter((x) => x.i <= i && !x.warn));
+            let v;
+            const live = evs.filter((x) => !x.warn && x.hit !== false);
+            if (g && i === g.i) v = { kind: g.short ? "short" : "long", why: `다음 봉이 진입선을 넘으면 들어가요${failedHere(last, live, g) ? " · 조심: 같은 자리에서 방금 실패했어요" : ""}` };
+            else if (g && g.hit === false && i - g.i <= FRESH) v = { kind: "rest", why: "방금 신호는 취소됐어요 (진입선을 못 넘음)" };
+            else v = verdictOf(last, g, i, i >= last.length - 1 && legs >= 3 ? `${legs}번째 다리예요 (새로 안 들어가기)` : null, { list: live });
+            return withBadge(p, "브)", v, items);
           },
         };
       },
@@ -850,4 +972,4 @@ export function guideIndicators(T) {
 }
 
 /** 지표 창 순서 (맨 위에 모아서 보여 준다) */
-export const GUIDE_ORDER = ["rplan", "regime", "sixma", "pull20", "setup50", "pistol", "lshape", "vwapswing", "barread"];
+export const GUIDE_ORDER = ["rplan", "regime", "sixma", "pull20", "setup50", "pistol", "lshape", "vwapswing", "barread", "autofib"];

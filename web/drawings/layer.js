@@ -52,6 +52,14 @@ const FIB = [
   [0.786, "#3d8bff"],
   [1, "#a0a6ae"],
 ];
+// 0.25 단위 피보 (0.22.0, 사용자: "원래 피보랑 0.25 피보 둘 다"): 그림마다 고른다 (dw.q). 마지막에 고른 것을 다음 피보의 기본으로 기억 (cfg.chart.fib_quarter)
+const FIB_Q = [
+  [0, "#a0a6ae"],
+  [0.25, "#ff8a3d"],
+  [0.5, "#4cd5a0"],
+  [0.75, "#3d8bff"],
+  [1, "#a0a6ae"],
+];
 /** 알림을 걸 수 있는 그림 (가격이 이 선을 넘으면) */
 export const ALERTABLE = new Set(["trend", "info", "hline", "hray", "triangle", "avwap"]);
 const FONT = '"Segoe UI", "Malgun Gothic", sans-serif';
@@ -164,7 +172,7 @@ export function createDrawings(o) {
         const xr = dw.extR ? W + 10 : Math.max(A.x, B.x);
         s.segs.push([A.x, A.y, B.x, B.y, "dash"]);
         let prevY = null;
-        for (const [lv, c] of FIB) {
+        for (const [lv, c] of dw.q ? FIB_Q : FIB) {
           const price = dw.pts[1].p + (dw.pts[0].p - dw.pts[1].p) * lv;
           const y = yOf(price);
           if (y == null) continue;
@@ -367,7 +375,7 @@ export function createDrawings(o) {
     if (draft) {
       const pts = [...draft.pts, draft.hover].filter(Boolean);
       const st = draft.type === "brush" ? brushStyle(cfg) : { color: START_COLOR[draft.type], width: 2 }; // 그리는 동안에도 고른 브러시 색·두께로
-      const s = shapeOf({ id: "draft", type: draft.type, pts, color: st.color, width: st.width, extR: draft.type === "fib" }, m, ax);
+      const s = shapeOf({ id: "draft", type: draft.type, pts, color: st.color, width: st.width, extR: draft.type === "fib", q: !!cfg.chart.fib_quarter }, m, ax);
       if (s) shapes.push({ dw: { id: "draft" }, s, draft: true });
     } else if (aim && tool) {
       const s = shapeOf({ id: "draft", type: "trend", pts: [aim], color: START_COLOR[tool], width: 2 }, m, ax);
@@ -706,6 +714,7 @@ export function createDrawings(o) {
     if (!d || d.pts.length < need) return;
     const st = d.type === "brush" ? brushStyle(cfg) : { color: START_COLOR[d.type], width: d.type === "hline" || d.type === "hray" ? 1 : 2 };
     const dw = { id: newId(), type: d.type, pts: d.type === "brush" ? d.pts : d.pts.slice(0, TOOLS[d.type].n), color: st.color, width: st.width, extL: false, extR: d.type === "fib", locked: false };
+    if (d.type === "fib" && cfg.chart.fib_quarter) dw.q = true;
     aim = null;
     // 계속 그리기면 도구를 그대로 두고 바로 다음 것을 그린다. 추세선은 막대를 띄워 둔다 → 세 번째 클릭으로 바로 평행선 (0.20.0)
     if (cfg.chart.keep_draw_tool ?? true) selId = LINE_LIKE.has(d.type) ? dw.id : null;
@@ -775,6 +784,12 @@ export function createDrawings(o) {
     paintBar();
   }
 
+  function setFibQ(dw, q) {
+    cfg.chart.fib_quarter = q;
+    cfg.save();
+    update(dw.id, { q });
+  }
+
   function paintBar() {
     const dw = list().find((x) => x.id === selId);
     bar.hidden = !dw;
@@ -795,6 +810,7 @@ export function createDrawings(o) {
       lineLike ? b("← 연장", dw.extL, () => update(dw.id, { extL: !dw.extL }), "왼쪽으로 화면 끝까지 늘리기") : null,
       lineLike || dw.type === "fib" ? b("연장 →", dw.extR, () => update(dw.id, { extR: !dw.extR }), "오른쪽으로 화면 끝까지 늘리기") : null,
       lineLike ? parallel("∥ 평행선") : null,
+      dw.type === "fib" ? [[false, "기본", "원래 피보나치: 23.6 · 38.2 · 50 · 61.8 · 78.6%"], [true, "0.25", "0.25 단위: 25 · 50 · 75%"]].map(([q, l, tip]) => b(l, !!dw.q === q, () => setFibQ(dw, q), `${tip}\n다음에 긋는 피보도 이 단위로 시작해요`)) : null,
       b(dw.locked ? "🔒" : "🔓", dw.locked, () => update(dw.id, { locked: !dw.locked }), "잠금: 실수로 옮기지 않게"),
       ALERTABLE.has(dw.type) ? b("🔔", false, () => o.onAlert?.(dw), "알림 만들기\n가격(종가)이 이 선을 넘으면 알려줘요") : null,
       b("🗑", false, () => remove(dw.id), "지우기 (Delete)"),

@@ -282,7 +282,28 @@ check("XIRR: 1년 뒤 10% → 10%", xirr([[0, -1000], [365 * day, 1100]]), 0.1, 
       }
       if (bad.length) console.warn("[시험] 매매 방식 지표", bad);
       check(`매매 방식 지표 9개: 5분봉·일봉에서 오류 없이 그려지고 범례가 나온다${bad.length ? ` — ${bad.join(" / ")}` : ""}`, bad.length, 0);
-      check("매매 방식 지표 9개: 설명서(쓰는 봉·보는 법)가 있고 지표 창 맨 위에 나온다", [GUIDE_ORDER.length, GUIDE_ORDER.filter((id) => EXPLAIN[id]?.one && /\[/.test(EXPLAIN[id].read)).length, yes(ORDER.slice(0, 9).join() === GUIDE_ORDER.join())], [9, 9, 1]);
+      check("매매 방식 지표 10개: 설명서(쓰는 봉·보는 법)가 있고 지표 창 맨 위에 나온다", [GUIDE_ORDER.length, GUIDE_ORDER.filter((id) => EXPLAIN[id]?.one && /\[/.test(EXPLAIN[id].read)).length, yes(ORDER.slice(0, 10).join() === GUIDE_ORDER.join())], [10, 10, 1]);
+      // 0.22.0 딱지: 신호를 내는 지표는 범례가 '롱 후보·숏 후보·쉼' 한 줄로 시작하고, 기본은 그 한 줄뿐 (자세한 글자는 설정에서)
+      const SIG = ["regime", "sixma", "pull20", "setup50", "pistol", "lshape", "vwapswing", "barread"];
+      const badgeOf = (id, detail) => {
+        const hd = IND[id].make(mkCtx("5m"), wd({ id, params: { detail } }));
+        hd.render(rw, 0);
+        return hd.legend(rw.length - 1);
+      };
+      check("딱지: 신호 지표 8개의 범례 첫 칸이 롱·숏·쉼 딱지이고 이유가 적혀 있다", SIG.filter((id) => { const a = badgeOf(id, false)[0]; return ["long", "short", "rest"].includes(a?.badge) && a.value; }).length, 8);
+      check("딱지: 기본은 딱지 한 줄만, '자세한 글자도 보기'를 켜면 더 나온다", [SIG.filter((id) => id === "regime" || badgeOf(id, false).length === 1).length, SIG.filter((id) => badgeOf(id, true).length > 1).length], [8, 8]);
+      // 같은 자리 재실패: 근처에서 같은 방향 신호가 방금 손절선에 닿았으면 '조심' (막지는 않음)
+      const { failedHere } = await import("../indicators/guides.js");
+      const lb = [10, 9, 10, 10, 10].map((c, k) => ({ t: k * 60, o: c, h: c + 0.2, l: c - 0.2, c }));
+      const sig = (i, entry = 10) => ({ i, entry, stop: entry - 0.5 });
+      check("같은 자리 재실패: 앞 신호가 손절선에 닿았으면 참 · 멀리 떨어진 가격이면 아님 · 앞 신호가 안 닿았으면 아님", [yes(failedHere(lb, [sig(0)], sig(3))), yes(failedHere(lb, [sig(0)], sig(3, 12))), yes(failedHere(lb, [sig(2)], sig(4)))], [1, 0, 0]);
+      // 자동 피보: 저점이 먼저면 오른 움직임 → 0%는 고점, 100%는 저점, 50%는 한가운데
+      const fb = [10, 11, 9, 12, 15, 14, 13].map((c, k) => ({ t: k * 60, o: c, h: c + 1, l: c - 1, c }));
+      const af = S.autoFib(fb, 120);
+      check("자동 피보: 오른 움직임이면 고점에서 아래로 잰다 (0% = 고점, 50% = 가운데, 100% = 저점)", [yes(af.up), af.price(0), af.price(0.5), af.price(1)], [1, 16, 12, 8]);
+      const af2 = S.autoFib(S.flipBars(fb), 120);
+      check("자동 피보: 내린 움직임이면 저점에서 위로 잰다", [yes(af2.up), af2.price(0), af2.price(1)], [0, -16, -8]);
+      check("자동 피보: 그 봉까지만 본다 (뒤에 더 높은 고점이 있어도 안 씀)", S.autoFib(fb, 120, 3).H, 13);
     }
   }
   // 오프닝 레인지: 9:30~9:45(15분) 고가·저가는 9:45 봉부터, 다음 날은 다시

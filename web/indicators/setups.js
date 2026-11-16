@@ -458,6 +458,27 @@ export function isSignalBar(b, a) {
 }
 
 /** 레인지 구간(i 바로 앞 len봉)의 고·저와 3등분 선 */
+/**
+ * 자동 피보 (0.22.0): 최근 look봉에서 가장 높은 고가와 가장 낮은 저가를 잇는다. 뒤에 나온 쪽이 움직임의 '끝'.
+ * 되돌림은 끝(0)에서 시작(1) 쪽으로 잰다: 오른 움직임이면 고점에서 아래로, 내린 움직임이면 저점에서 위로.
+ * end번 봉까지만 본다. 돌려주는 것: {up, hi, lo, H, L, from, price(lv)} 또는 null
+ */
+export function autoFib(bars, look = 120, end = bars.length - 1) {
+  const s = Math.max(0, end - look + 1);
+  let hi = -1;
+  let lo = -1;
+  for (let i = s; i <= end; i++) {
+    if (!bars[i]) continue;
+    if (hi < 0 || bars[i].h > bars[hi].h) hi = i;
+    if (lo < 0 || bars[i].l < bars[lo].l) lo = i;
+  }
+  if (hi < 0 || hi === lo || !(bars[hi].h > bars[lo].l)) return null;
+  const up = lo < hi;
+  const H = bars[hi].h;
+  const L = bars[lo].l;
+  return { up, hi, lo, H, L, from: Math.min(hi, lo), price: (lv) => (up ? H - (H - L) * lv : L + (H - L) * lv) };
+}
+
 export function rangeZone(bars, i, len = 40) {
   const s = Math.max(0, i - len);
   if (i - s < 5) return null;

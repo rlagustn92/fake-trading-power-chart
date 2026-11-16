@@ -941,6 +941,12 @@ export function createCell(env, cc) {
           row = newRow();
           continue;
         }
+        // 딱지 (0.22.0 매매 방식 지표): badge = long·short·rest → 큰 글자 한 덩이 + 이유 한 줄. 색은 봉 색(한국식·미국식)을 따른다
+        if (it.badge) {
+          const bg = it.badge === "long" ? upColor() : it.badge === "short" ? downColor() : "#5a626c";
+          row.append(h(`span.lg-badge.${it.badge}`, { style: `background:${bg}` }, it.label), h("span.lg-why", ` ${it.value ?? ""}  `));
+          continue;
+        }
         if (it.action) {
           row.append(h("button.lg-act", { "data-tip-text": it.action.tip, onclick: (e) => (e.stopPropagation(), it.action.onclick()) }, it.action.text));
           continue;

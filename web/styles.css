@@ -161,6 +161,10 @@ button.icon.on { background: var(--primary); border-color: var(--primary); }
 .lg-ind { pointer-events: auto; cursor: pointer; width: fit-content; max-width: 100%; border-radius: 4px; padding-right: 4px; }
 .lg-ind:hover { background: rgba(255, 255, 255, 0.06); }
 .lg-name { font-weight: 600; }
+/* 롱·숏·쉼 딱지 (0.22.0): 한눈에 보이게 크게 */
+.lg-badge { display: inline-block; font-size: 17px; font-weight: 800; color: #fff; padding: 1px 10px; border-radius: 6px; margin: 2px 0; line-height: 1.5; }
+.lg-badge.rest { color: #dfe3e8; }
+.lg-why { color: #e8eaed; font-size: 14px; background: rgba(16, 18, 22, 0.78); padding: 2px 6px; border-radius: 4px; margin-left: 4px; }
 .lg-val { color: #c9ced6; }
 
 /* ── 관심종목 ── */
