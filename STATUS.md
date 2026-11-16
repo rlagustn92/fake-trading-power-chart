@@ -1,7 +1,7 @@
 # 작업 현황 — 어디까지 했나 (FAKE TRADING POWER CHART)
 
-**기준일: 2026-11-06 (금요일)** · 이 파일을 고칠 때마다 기준일도 바꾼다.
-**버전 0.20.0** ([CHANGELOG.md](CHANGELOG.md), 2026-11-06 GitHub main에 올림 · Releases v0.20.0 빌드 성공 확인) · 시험 154개 통과 (Rust 13개) · EXE `release\FAKE TRADING POWER CHART.exe` + 바탕화면 바로가기 (2026-10-30, Rust·VS Build Tools·tauri-cli 설치함)
+**기준일: 2026-11-16 (월요일)** · 이 파일을 고칠 때마다 기준일도 바꾼다.
+**버전 0.21.0** ([CHANGELOG.md](CHANGELOG.md), 2026-11-16 매매 방식 지표 9개 — **아직 GitHub에 안 올림**(커밋·푸시 전, 사용자 확인 대기). 올라가 있는 것은 0.20.0) · 시험 179개 통과 (Rust 13개) · EXE `release\FAKE TRADING POWER CHART.exe` + 바탕화면 바로가기 (2026-10-30, Rust·VS Build Tools·tauri-cli 설치함)
 
 같이 볼 것: 사용법 [README.md](README.md) · 기획 [FAKE_TRADING_기획서.md](FAKE_TRADING_기획서.md) · 데이터 조사 [DATA_RESEARCH.md](DATA_RESEARCH.md) · 다음 할 일 [NEXT_START_HERE.md](NEXT_START_HERE.md) · 원본 기획 [SPEC.md](SPEC.md)
 
@@ -121,6 +121,13 @@
 ---
 
 ## ⏳ 아직 확인 못 한 것
+0. **0.21.0 매매 방식 지표 9개 (2026-11-16)** — `web/indicators/setups.js`(계산) + `guides.js`(그리기), 지표 창 맨 위. 결정·규칙은 CHANGELOG 0.21.0과 CLAUDE.md "0.21.0"
+   - 2026-11-16 검수(교재와 한 줄씩 대조) 뒤 더한 것: 6선 매물대(자동), 20·200 갭 조건, 50·200 거래량 확인·골크/데크·VWMA 100 익절·시간 손절 알림, 이름 앞 약자(공·비·불·이·섀·브). 검수표는 사용자 PC의 교재 폴더(`00_지표_검수표.md`)
+   - 확인한 것: 시험 179개 통과 · 개발 서버 NVDA 24h 5분봉·4시간봉·일봉에서 9개 모두 오류 없이 그려짐 (콘솔 오류 없음)
+   - **못 한 것**: 리플레이를 직접 돌려 신호가 제때 나오는지 눈으로 보기(시험으로만 확인) · 미국 주식(정규장 있는 종목)에서 '봉 읽기' 장 시작 쉬는 봉 · EXE에서 보기 · 신호가 실제로 쓸 만한지(사용자가 리플레이로 써 보고 숫자 조정)
+   - **아직 GitHub에 안 올렸다** (사용자에게 확인하고 커밋·푸시)
+   - 다음에 할 만한 것 (사용자가 원하면): 신호 선을 눌러 대기 주문선으로 옮기기 · 매매일지에 셋업 이름 달아 셋업별 승률 보기 · 직접 그은 박스를 매물대로 읽기
+   - 강의 자료·규칙서는 저장소에 넣지 않는다 (공개 저장소 · 사용자 PC의 `D:\` 폴더와 클로드 프로젝트에만)
 1. **사용자가 직접 써 보기** — 0.1.0은 써 보셨다(레버리지·분할 매수·원하는 양 정리 요청 → 0.2.0). 0.2.0은 아직. 끌기 조작감·글씨 크기 의견은 아직 없음
 2. **EXE를 실제로 켜 보기** — 0.4.0을 오류 없이 구웠다 (2분 19초, 8.5MB, 경고 0, 아이콘 주황 F 확인). 바탕화면 바로가기 `FAKE TRADING POWER CHART.lnk` 만듦. **도구로는 켜지 않았다** (데이터 폴더가 갈라짐) → 사용자가 바로가기로 켜서 확인할 것: 창 제목 "FAKE TRADING POWER CHART 0.4.0", 처음 안내, 💰 30일 받기(EXE에서 Binance 받기), 원본 앱과 동시에 켜기. 기록: `\\localhost\C$\Users\<사용자>\AppData\Roaming\fake-trading-power-chart\logs\app.log`
    - EXE는 빈 데이터로 시작한다. 개발 서버에서 쓴 거래 8개·NVDA 30일치(`tools/dev-data`)는 옮기지 않았다

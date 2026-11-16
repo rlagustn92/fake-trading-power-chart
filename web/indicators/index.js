@@ -6,6 +6,7 @@ import { BandFill, Levels, VolumeProfile, AutoTriangle, Segments } from "../ui/p
 import { TF_SEC } from "../core/bars.js";
 import { findTriangle } from "./triangle.js";
 import { upColor, downColor, rgba } from "../core/colors.js";
+import { guideIndicators, GUIDE_ORDER } from "./guides.js";
 
 // 오름·내림 색은 한국식·미국식 설정을 따른다 (core/colors.js, 0.13.0) → 그릴 때마다 읽는다
 const close = (bars) => bars.map((b) => b.c);
@@ -891,6 +892,8 @@ export const INDICATORS = {
       };
     },
   },
+  // ── 매매 방식 지표 (0.21.0, guides.js): 손익 계획선·국면 신호등·6선 자리·20·200 눌림·50·200 셋업·권총·ㄴ자·VWAP 스윙·봉 읽기 ──
+  ...guideIndicators({ paintLine, paintHist, paintSessionLine, hexA, mapHtf, mapHtfLive, htfOpt, tfMode }),
 };
 
 /** VWAP처럼 세션마다 새로 시작하는 선: 날짜가 바뀌는 첫 봉은 비워서 선이 이어지지 않게 */
@@ -964,4 +967,4 @@ export function withDefaults(inst, k = 0) {
 }
 
 /** 지표 목록 화면 순서 */
-export const ORDER = ["sma", "ema", "mtfma", "dualma", "vwma", "bb", "vwbb", "volume", "rvol", "rsi", "rsi_div", "macd", "stoch", "atr", "drawdown", "disparity", "fractals", "hl52", "triangle_auto", "vwap", "vpvr", "orb", "pdhl", "pivots"];
+export const ORDER = [...GUIDE_ORDER, "sma", "ema", "mtfma", "dualma", "vwma", "bb", "vwbb", "volume", "rvol", "rsi", "rsi_div", "macd", "stoch", "atr", "drawdown", "disparity", "fractals", "hl52", "triangle_auto", "vwap", "vpvr", "orb", "pdhl", "pivots"];

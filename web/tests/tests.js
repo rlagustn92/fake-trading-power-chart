@@ -162,6 +162,129 @@ check("XIRR: 1년 뒤 10% → 10%", xirr([[0, -1000], [365 * day, 1100]]), 0.1, 
     hd.render(b5, 0);
     check("SMA 기준 봉 1시간인데 차트가 4시간 → 숨기고 범례에 알림 (예전엔 4시간 SMA로 몰래 바뀜)", [series[0].data.length, yes(/숨김/.test(hd.legend(0)[0].label))], [0, 1]);
   }
+  {
+    // 0.21.0 매매 방식 지표 (setups.js 계산 + guides.js 그리기)
+    const S = await import("../indicators/setups.js");
+    const { GUIDE_ORDER } = await import("../indicators/guides.js");
+    const { EXPLAIN } = await import("../indicators/explain.js");
+    const { ORDER } = await import("../indicators/index.js");
+    const pl = S.tradePlan("long", 100, 98, 100);
+    check("계획선 롱: 진입 100 · 손절 98 · 잃을 돈 100 → 수량 50, 금액 5000, 1R·2R·3R = 102·104·106", [pl.qty, pl.notional, pl.distPct, ...pl.targets.map((t) => t.price)], [50, 5000, 2, 102, 104, 106]);
+    const ps = S.tradePlan("short", 100, 104, 200, [1, 2]);
+    check("계획선 숏: 진입 100 · 손절 104 → 수량 50, 목표는 아래로 96·92 / 손절이 반대쪽이면 없음", [ps.qty, ...ps.targets.map((t) => t.price), yes(S.tradePlan("long", 100, 101, 100) === null)], [50, 96, 92, 1]);
+    check("손익비: 롱 100→106 손절 98 = 3 · 숏 100→94 손절 102 = 3 · 반대로 가는 목표는 음수", [S.rrOf(100, 98, 106), S.rrOf(100, 102, 94), S.rrOf(100, 98, 96)], [3, 3, -2]);
+    const sw = S.swingPoints([1, 2, 5, 2, 1, 2, 0.5, 2, 3].map((x) => ({ h: x, l: x })), 2);
+    check("꼭짓점: 고점 2번(확정 4번 봉) · 저점 6번(확정 8번 봉)", sw.flatMap((x) => [x.i, x.at, yes(x.kind === "H")]), [2, 4, 1, 6, 8, 0]);
+    const is = (a, b) => yes(a === b);
+    check("6선 국면: 7>21>60 정배열 · 반대 역배열 · 뭉치면 박스 · 섞이면 전환", [is(S.sixState(30, 20, 10, 1), "up"), is(S.sixState(10, 20, 30, 1), "down"), is(S.sixState(10.2, 10, 10.5, 1), "box"), is(S.sixState(20, 30, 10, 1), "turn")], [1, 1, 1, 1]);
+    check("20선 국면: 아래서 위로 기움 = 상승 · 위에서 아래로 = 하락 · 기울기 없으면 평평 · 엇갈리면 애매", [is(S.e20State(105, 100, 99, 1), "up"), is(S.e20State(95, 100, 101, 1), "down"), is(S.e20State(105, 100, 99.9, 1), "flat"), is(S.e20State(95, 100, 99, 1), "mixed")], [1, 1, 1, 1]);
+    check("50·200 국면: 정배열+50선 위 = 롱 · 역배열+50선 아래 = 숏 · 정배열인데 50선 아래 = 기다림", [is(S.s50State(120, 110, 100), "up"), is(S.s50State(80, 90, 100), "down"), is(S.s50State(105, 110, 100), "wait")], [1, 1, 1]);
+    check("4단계: 가격>50>200·50 오름 = 2 · 가격<50<200·50 내림 = 4 · 50>200인데 아님 = 3 · 50<200인데 아님 = 1", [S.stageOf(120, 110, 109, 100), S.stageOf(80, 90, 91, 100), S.stageOf(105, 110, 109, 100), S.stageOf(95, 90, 91, 100)], [2, 4, 3, 1]);
+    {
+      const bs = Array.from({ length: 16 }, (_, k) => ({ c: k < 12 ? 11 : 9 }));
+      const st = S.alwaysIn(bs, bs.map(() => 10), 10, 3);
+      check("올웨이즈 인: 위로 10봉째부터 추세(1) · 반대 종가 2봉까지는 유지 · 3봉째 레인지(0)", [st[8], st[9], st[13], st[14]], [0, 1, 1, 0]);
+    }
+    // 권총: 100에서 30봉 → 10봉 동안 120까지 급등 → 12봉 횡보(119.5~120.5) → 122로 마감. 느린 이평은 베이스 안(119.6)에 붙어 있다고 둔다
+    const bar = (o, c, h = Math.max(o, c) + 0.5, l = Math.min(o, c) - 0.5) => ({ o, c, h, l, v: 1 });
+    const flatAt = (p, n) => Array.from({ length: n }, () => bar(p, p));
+    const rise = Array.from({ length: 10 }, (_, k) => bar(100 + 2 * k, 102 + 2 * k));
+    const pb = [...flatAt(100, 30), ...rise, ...flatAt(120, 12), { o: 120, c: 122, h: 122.5, l: 119.8, v: 1 }].map((b, t) => ({ ...b, t }));
+    const pe = S.findSetups(pb, pb.map(() => 119.6), C.atr(pb, 14));
+    check("권총: 급등 뒤 12봉 횡보를 위로 마감 → 52번 봉 '권총 ▲', 베이스 119.5~120.5, 손절 = 베이스 아래", [pe.length, pe[0]?.i, is(pe[0]?.kind, "pistol"), is(pe[0]?.dir, "go"), pe[0]?.lo, pe[0]?.hi, pe[0]?.stop], [1, 52, 1, 1, 119.5, 120.5, 119.5]);
+    const pend = S.pendingSetup(pb.slice(0, 52), pb.map(() => 119.6), C.atr(pb.slice(0, 52), 14));
+    check("권총: 벗어나기 전에는 '만들어지는 중'으로 보인다", [is(pend?.kind, "pistol"), pend?.hi], [1, 120.5]);
+    // ㄴ자: 120에서 30봉 → 10봉 동안 100까지 급락 → 12봉 횡보 → 이평(100.3)을 올라타며 102로 마감. 절반 익절 = 99.5 + (120.5 − 99.5)/2 = 110
+    const drop = Array.from({ length: 10 }, (_, k) => bar(120 - 2 * k, 118 - 2 * k));
+    const lb = [...flatAt(120, 30), ...drop, ...flatAt(100, 12), { o: 100, c: 102, h: 102.5, l: 99.8, v: 1 }].map((b, t) => ({ ...b, t }));
+    const le = S.findSetups(lb, lb.map(() => 100.3), C.atr(lb, 14));
+    check("ㄴ자: 급락 뒤 횡보를 이평 위로 마감 → 'ㄴ자 ▲', 절반 익절 110", [le.length, le[0]?.i, is(le[0]?.kind, "lshape"), is(le[0]?.dir, "go"), le[0]?.half], [1, 52, 1, 1, 110]);
+    const lf = S.findSetups([...lb.slice(0, 52), { o: 100, c: 98, h: 100.2, l: 97.5, v: 1, t: 52 }], lb.map(() => 100.3), C.atr(lb, 14));
+    check("ㄴ자: 아래로 마감하면 '이탈'(하락 지속)", [lf.length, is(lf[0]?.dir, "fail")], [1, 1]);
+    {
+      // 20선 눌림: 100 → 110 상승, 음봉 3개로 105.2까지(48% 되돌림), 좁은 봉. 진입 105.8 · 손절 105.2 · 목표 110 → 손익비 7
+      const up = [102, 104, 106, 108, 110].map((c) => ({ o: c - 2, c, h: c, l: c - 2 }));
+      const red = [[110, 108.5], [108.5, 107], [107, 105.5]].map(([o, c]) => ({ o, c, h: o, l: c }));
+      const bs = [...Array.from({ length: 10 }, () => ({ o: 100, c: 100, h: 100.2, l: 100 })), ...up, ...red, { o: 105.5, c: 105.6, h: 105.8, l: 105.2 }];
+      const ma = bs.map((_, i) => 105 - (18 - i) * 0.4);
+      const ev = S.findPullbacks(bs, ma, bs.map(() => 1), { look: 10 });
+      check("20선 눌림: 음봉 3개·48% 되돌림·좁은 봉 → 18번 봉, 진입 105.8 · 손절 105.2 · 목표 110 · 손익비 7", [ev.length, ev[0]?.i, ev[0]?.entry, ev[0]?.stop, ev[0]?.target, ev[0]?.rr, yes(ev[0]?.ok)], [1, 18, 105.8, 105.2, 110, 7, 1], 1e-6);
+      check("20선 눌림: 음봉이 4개 이어져야 한다고 하면 없음 · 20선이 평평하면 없음", [S.findPullbacks(bs, ma, bs.map(() => 1), { look: 10, reds: 4 }).length, S.findPullbacks(bs, bs.map(() => 105), bs.map(() => 1), { look: 10 }).length], [0, 0]);
+    }
+    {
+      // 매물대(자동): 12봉이 몸통 100에서 막히다가(꼬리 100.5) 몸통 큰 양봉이 103으로 뚫음 → 100이 지지. 4봉 뒤 100까지 내려와 닿음 = 리테스트
+      const zb = [...flatAt(100, 30), { o: 100, c: 103, h: 103.2, l: 99.9, v: 5 }, ...flatAt(102.5, 3), { o: 102, c: 101, h: 102.2, l: 100, v: 1 }].map((b, t) => ({ ...b, t }));
+      const zs = S.findZones(zb, C.atr(zb, 14));
+      check("매물대(자동): 막히던 몸통 값 100을 큰 양봉이 뚫음 → 지지 100, 34번 봉에서 리테스트", [zs.length, zs[0]?.i, is(zs[0]?.kind, "sup"), zs[0]?.level, zs[0]?.test], [1, 30, 1, 100, 34]);
+      check("매물대(자동): 다시 닿기 전에는 '아직 안 닿음'(−1) · 몸통이 작은 봉으로 넘으면 매물대 아님", [S.findZones(zb.slice(0, 34), C.atr(zb, 14))[0]?.test, S.findZones([...flatAt(100, 30), { o: 100, c: 100.9, h: 101, l: 99.9, v: 1 }], C.atr(zb, 14)).length], [-1, 0]);
+      check("거래량 배수: 앞 20봉 평균 1인데 이 봉 5 → 5배 · 앞 봉이 모자라면 없음", [S.volRatio(zb, 30), S.volRatio(zb, 5)], [5, null]);
+    }
+    check("신호 봉: 고가 근처 마감 양봉 = 맞음 · 음봉 = 아님 · 가운데 마감 = 아님 · 너무 작은 봉 = 아님", [yes(S.isSignalBar({ o: 10, h: 11, l: 9.9, c: 10.95 }, 1)), yes(S.isSignalBar({ o: 11, h: 11, l: 10, c: 10.1 }, 1)), yes(S.isSignalBar({ o: 10, h: 11, l: 9.9, c: 10.4 }, 1)), yes(S.isSignalBar({ o: 10, h: 10.2, l: 9.98, c: 10.19 }, 1))], [1, 0, 0, 0]);
+    {
+      const bs = Array.from({ length: 30 }, (_, i) => ({ h: i === 25 ? 12 : 13, l: i === 25 ? 9.5 : 11, c: 12 }));
+      const ft = S.firstTouches(bs, bs.map(() => 10));
+      check("이평선 첫 닿음: 25번 봉에서 위에서 내려와 닿음", [ft.length, ft[0]?.i, is(ft[0]?.side, "sup")], [1, 25, 1]);
+    }
+    {
+      // 미래 봉을 안 보는지: 400봉으로 찾은 신호 중 앞 300봉 안의 것 = 300봉만 주고 찾은 것 (리플레이에서 그때 보였을 그대로)
+      let seed = 7;
+      const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+      let pz = 100;
+      const rw = Array.from({ length: 400 }, (_, t) => {
+        const o = pz;
+        const tr = Math.sin(t / 25) * 0.25;
+        const c = o + tr + (rnd() - 0.5) * 1.2;
+        pz = c;
+        return { t: t * 300, o, c, h: Math.max(o, c) + rnd() * 0.4, l: Math.min(o, c) - rnd() * 0.4, v: 100 + rnd() * 50 };
+      });
+      const run = (bs) => {
+        const cl = bs.map((b) => b.c);
+        const atr = C.atr(bs, 14);
+        const m20 = C.sma(cl, 20);
+        const m7 = C.sma(cl, 7);
+        const e20 = C.ema(cl, 20);
+        const lvl = [{ name: "x", vals: C.sma(cl, 60) }];
+        return [
+          S.findSetups(bs, C.sma(cl, 50), atr, { impK: 3 }),
+          S.findPullbacks(bs, m20, atr, { lo: 0.2, hi: 0.8, reds: 2, minRR: 0.5 }),
+          S.findFirstHH(bs, m20, atr),
+          S.findBarSignals(bs, e20, atr, S.alwaysIn(bs, e20, 5)),
+          S.findSixTriggers(bs, m7, m20, atr, lvl, { nearPct: 1, gapPct: 0.2 }),
+          S.findZones(bs, atr, { bigK: 0.8 }),
+        ];
+      };
+      const full = run(rw).map((evs) => evs.filter((e) => e.i < 299).map((e) => e.i));
+      const cut = run(rw.slice(0, 300)).map((evs) => evs.filter((e) => e.i < 299).map((e) => e.i));
+      check("매매 방식 신호 6종: 미래 봉을 안 본다 (400봉으로 본 과거 신호 = 300봉만 보고 찾은 신호)", full.map((a, k) => yes(a.join() === cut[k].join())), [1, 1, 1, 1, 1, 1]);
+      check("매매 방식 신호: 시험 자료에서 실제로 신호가 나온다 (빈 것끼리 비교한 게 아님)", yes(full.flat().length >= 5), 1);
+      // 숏은 봉을 뒤집어 같은 함수로: 뒤집은 봉에서 찾은 롱 신호 수 = 원래 봉을 위아래로 뒤집어 다시 뒤집은 것과 같다
+      const f2 = S.flipBars(S.flipBars(rw));
+      check("봉 뒤집기 두 번 = 원래 봉", [f2[5].h, f2[5].l, f2[5].o, f2[5].c], [rw[5].h, rw[5].l, rw[5].o, rw[5].c]);
+      // 그리기: 지표 9개가 가짜 차트 칸에서 오류 없이 그려지고 범례가 나오는지 (분봉·일봉 둘 다)
+      const mkCtx = (tf) => {
+        const mk = () => ({ data: [], setData(d) { this.data = d; }, update(pt) { this.data.push(pt); }, createPriceLine() {} });
+        return { tf, decimals: 2, replaying: false, replayEnd: null, info: { volume: true, rth: tf === "5m" ? [0, 86400] : null }, time: (t) => t, tfName: (t) => `${t}봉`, fmt: (v) => (v == null ? "—" : v.toFixed(2)), addLine: mk, addHist: mk, newPane: () => 1, attach() {}, setMarkers() {}, htf: () => null, htfKeyOf: () => (x) => x, dayKey: (t) => Math.floor(t / 86400), isRegular: () => true };
+      };
+      const bad = [];
+      for (const tf of ["5m", "1D"]) {
+        for (const id of GUIDE_ORDER) {
+          try {
+            const hd = IND[id].make(mkCtx(tf), wd({ id }));
+            hd.render(rw, 0);
+            hd.render(rw, rw.length - 1);
+            const lg = hd.legend(rw.length - 1);
+            if (!Array.isArray(lg) || !lg.length) bad.push(`${id} ${tf}: 범례 없음`);
+            hd.legend(3);
+          } catch (e) {
+            bad.push(`${id} ${tf}: ${e.message}`);
+          }
+        }
+      }
+      if (bad.length) console.warn("[시험] 매매 방식 지표", bad);
+      check(`매매 방식 지표 9개: 5분봉·일봉에서 오류 없이 그려지고 범례가 나온다${bad.length ? ` — ${bad.join(" / ")}` : ""}`, bad.length, 0);
+      check("매매 방식 지표 9개: 설명서(쓰는 봉·보는 법)가 있고 지표 창 맨 위에 나온다", [GUIDE_ORDER.length, GUIDE_ORDER.filter((id) => EXPLAIN[id]?.one && /\[/.test(EXPLAIN[id].read)).length, yes(ORDER.slice(0, 9).join() === GUIDE_ORDER.join())], [9, 9, 1]);
+    }
+  }
   // 오프닝 레인지: 9:30~9:45(15분) 고가·저가는 9:45 봉부터, 다음 날은 다시
   const at = (d, hh, mm) => d * 86400 + hh * 3600 + mm * 60;
   const ob = [[0, 9, 30, 10, 8], [0, 9, 35, 12, 9], [0, 9, 40, 11, 7], [0, 9, 45, 13, 10], [1, 9, 30, 20, 19], [1, 9, 45, 21, 18]].map(([d, hh, mm, hi, lo]) => ({ t: at(d, hh, mm), h: hi, l: lo }));
@@ -663,7 +786,7 @@ section("📏 자 오른쪽 클릭 — 그리기 도구와 같은 규칙 (0.19.1
 // ── 모든 화면 파일이 문법 오류 없이 읽히는지 (하나라도 깨지면 EXE가 검은 화면에서 멈춘다) ──
 section("파일 읽기 (문법 오류 없는지)");
 {
-  const MODULES = ["alerts/engine", "backtest/engine", "backtest/view", "config", "core/bars", "core/colors", "core/csv", "core/events", "core/daily", "core/data", "core/db", "core/estimate", "core/intraday", "core/limit", "core/series", "core/session", "core/stocklist", "core/symbols", "core/tz", "drawings/geom", "drawings/layer", "drawings/store", "indicators/calc", "indicators/explain", "indicators/index", "indicators/sentiment", "indicators/triangle", "platform", "sources/alpaca", "sources/binance", "sources/hyperliquid", "sources/reconnect", "sources/sentiment", "sources/status", "sources/toss", "sources/yahoo", "trade/engine", "trade/history", "trade/journal", "trade/orderlines", "trade/panel", "ui/alerts", "ui/cell", "ui/dialog", "ui/dom", "ui/drawbar", "ui/format", "ui/goto", "ui/grid", "ui/indpanel", "ui/measure", "ui/menu", "ui/picker", "ui/primitives", "ui/replay", "ui/search", "ui/settings", "ui/sidebar", "ui/snapshot", "ui/statusbar", "ui/tip", "ui/toolbar", "ui/update", "ui/welcome"];
+  const MODULES = ["alerts/engine", "backtest/engine", "backtest/view", "config", "core/bars", "core/colors", "core/csv", "core/events", "core/daily", "core/data", "core/db", "core/estimate", "core/intraday", "core/limit", "core/series", "core/session", "core/stocklist", "core/symbols", "core/tz", "drawings/geom", "drawings/layer", "drawings/store", "indicators/calc", "indicators/explain", "indicators/guides", "indicators/index", "indicators/setups", "indicators/sentiment", "indicators/triangle", "platform", "sources/alpaca", "sources/binance", "sources/hyperliquid", "sources/reconnect", "sources/sentiment", "sources/status", "sources/toss", "sources/yahoo", "trade/engine", "trade/history", "trade/journal", "trade/orderlines", "trade/panel", "ui/alerts", "ui/cell", "ui/dialog", "ui/dom", "ui/drawbar", "ui/format", "ui/goto", "ui/grid", "ui/indpanel", "ui/measure", "ui/menu", "ui/picker", "ui/primitives", "ui/replay", "ui/search", "ui/settings", "ui/sidebar", "ui/snapshot", "ui/statusbar", "ui/tip", "ui/toolbar", "ui/update", "ui/welcome"];
   const broken = [];
   for (const m of MODULES) {
     try {
