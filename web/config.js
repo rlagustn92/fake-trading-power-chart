@@ -56,6 +56,18 @@ export async function loadConfig() {
     cfg.migrated = { ...cfg.migrated, fomc_off: true };
   }
 
+  // 2026-11-23 (0.26.0, 사용자: "VWAP 기본설정을 2로"): VWAP 표준편차 밴드 기본 0 → 2 (1배·2배 선).
+  // 예전 기본 0으로 들어가 있던 VWAP도 한 번만 2로 (모든 칸·기본 지표·프리셋). 그 뒤에 직접 0으로 바꾼 것은 그대로 둔다
+  if (!cfg.migrated?.vwap_bands_2) {
+    const fix = (list) => {
+      for (const x of Array.isArray(list) ? list : []) if (x?.id === "vwap" && !(x.params?.bands > 0)) x.params = { ...x.params, bands: 2 };
+    };
+    fix(cfg.indicators);
+    for (const L of Object.values(cfg.grid?.layouts ?? {})) for (const c of L.cells ?? []) fix(c.indicators);
+    for (const list of Object.values(cfg.indicator_presets ?? {})) fix(list);
+    cfg.migrated = { ...cfg.migrated, vwap_bands_2: true };
+  }
+
   const plain = () => {
     const { save, saveNow, defaults: _d, ...rest } = cfg;
     return rest;

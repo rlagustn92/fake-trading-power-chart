@@ -70,6 +70,32 @@ export function mapHtf(bars, htf, vals, o) {
   return out;
 }
 
+/**
+ * VWAP 범례 한마디 (0.26.0, 사용자: "간단명료 강력하게"): 종가 c가 VWAP v와 1배(u1·d1)·2배(u2·d2) 밴드의 어디에 있나.
+ * 밴드가 없으면(null) 그 칸은 건너뛰고 위·아래만
+ */
+export function vwapZone(c, v, u1, d1, u2, d2) {
+  if (u2 != null && c > u2) return "+2배 넘음 · 따라 사지 말기";
+  if (d2 != null && c < d2) return "−2배 넘음 · 따라 팔지 말기";
+  if (u1 != null && c > u1) return "+1~2배 · 강함";
+  if (d1 != null && c < d1) return "−1~2배 · 약함";
+  if (u1 == null) return c >= v ? "위 · 사는 쪽" : "아래 · 파는 쪽";
+  return c >= v ? "위 · 보통 범위" : "아래 · 보통 범위";
+}
+
+/**
+ * RSI·스토캐스틱 범례 한마디 (0.26.0, 사용자: "과매수·과매도를 한눈에, 너무 믿지는 말고"):
+ * 신호가 아니라 경고 → "따라 사지 말기"처럼 조심만 말한다. 선 밖에서 안으로 막 들어온 봉(앞 봉 v0 → 이 봉 v)만 "힘 빠짐·반등 기미"
+ */
+export function obosZone(v, v0, hi, lo) {
+  if (v == null) return "";
+  if (v >= hi) return "과매수 · 따라 사지 말기";
+  if (v <= lo) return "과매도 · 따라 팔지 말기";
+  if (v0 != null && v0 >= hi) return "과매수에서 내려옴 · 힘 빠짐";
+  if (v0 != null && v0 <= lo) return "과매도에서 올라옴 · 반등 기미";
+  return "보통";
+}
+
 /** mapHtf에 넘길 것: 시각 → 비교 값, 리플레이 중인지, 리플레이 시각, 상위 봉 길이(초) — 모든 "기준 봉" 지표가 같이 쓴다 */
 const htfOpt = (ctx, tf) => ({ htfKey: ctx.htfKeyOf(tf), replaying: ctx.replaying, endT: ctx.replayEnd, span: TF_SEC[tf], endOf: isLongTf(tf) ? (t) => periodEnd(tf, t) : null });
 
@@ -479,7 +505,8 @@ export const INDICATORS = {
   vwap: {
     short: "VWAP",
     pane: "price",
-    params: [{ key: "bands", label: "표준편차 밴드", def: 0, min: 0, max: 3 }],
+    // 밴드 기본 2 = 1배·2배 (0.26.0, 사용자: "보통 사람들이 보는 것"). 3배는 거의 안 닿아서 기본에서 뺀다 (고를 수는 있음)
+    params: [{ key: "bands", label: "표준편차 밴드 (추천 2)", def: 2, min: 0, max: 3 }],
     color: "#ff6fae",
     intradayOnly: true,
     needsVolume: true,
@@ -489,9 +516,11 @@ export const INDICATORS = {
       const bands = [];
       for (let k = 1; k <= nb; k++) bands.push([ctx.addLine(0, { color: hexA(inst.color, 0.6), lineWidth: 1, lineStyle: 2 }), ctx.addLine(0, { color: hexA(inst.color, 0.6), lineWidth: 1, lineStyle: 2 })]);
       let r = { vwap: [], bands: [] };
+      let last = [];
       return {
         series: [s, ...bands.flat()],
         render(bars, from) {
+          last = bars;
           r = C.vwap(bars, ctx.dayKey, bands.map((_, k) => k + 1));
           paintSessionLine(s, bars, r.vwap, ctx, from);
           bands.forEach(([u, d], k) => {
@@ -499,7 +528,12 @@ export const INDICATORS = {
             paintSessionLine(d, bars, r.bands[k].dn, ctx, from);
           });
         },
-        legend: (i) => [{ label: "VWAP", value: ctx.fmt(r.vwap[i]), color: inst.color }],
+        // 범례: 값 뒤에 지금 자리를 한마디로 (1배 안 = 보통, 1~2배 = 강함·약함, 2배 넘음 = 따라가지 말기)
+        legend: (i) => {
+          const v = r.vwap[i];
+          const c = last[i]?.c;
+          return [{ label: "VWAP", value: v == null ? "—" : `${ctx.fmt(v)}${c == null ? "" : ` · ${vwapZone(c, v, r.bands[0]?.up[i], r.bands[0]?.dn[i], r.bands[1]?.up[i], r.bands[1]?.dn[i])}`}`, color: inst.color }];
+        },
       };
     },
   },
@@ -763,7 +797,7 @@ export const INDICATORS = {
           vals = C.rsi(bars, p.length);
           paintLine(s, bars, vals, ctx.time, from);
         },
-        legend: (i) => [{ label: `RSI ${p.length}`, value: vals[i] == null ? "—" : vals[i].toFixed(2), color: inst.color }],
+        legend: (i) => [{ label: `RSI ${p.length}`, value: vals[i] == null ? "—" : `${vals[i].toFixed(2)} · ${obosZone(vals[i], vals[i - 1], p.hi, p.lo)}`, color: inst.color }],
       };
     },
   },
@@ -868,7 +902,7 @@ export const INDICATORS = {
           paintLine(d, bars, r.d, ctx.time, from);
         },
         legend: (i) => [
-          { label: `Stoch ${p.length} ${p.k} ${p.d}  %K`, value: r.k[i] == null ? "—" : r.k[i].toFixed(2), color: inst.color },
+          { label: `Stoch ${p.length} ${p.k} ${p.d}  %K`, value: r.k[i] == null ? "—" : `${r.k[i].toFixed(2)} · ${obosZone(r.k[i], r.k[i - 1], 80, 20)}`, color: inst.color },
           { label: "%D", value: r.d[i] == null ? "—" : r.d[i].toFixed(2), color: "#ff8a3d" },
         ],
       };

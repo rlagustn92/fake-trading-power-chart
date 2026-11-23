@@ -859,6 +859,22 @@ section("월봉 · 년봉 · 주·월 VWAP (0.25.0)");
   check("주식 종목은 월봉·년봉 있음 · 풋/콜 같은 심리 지표는 그대로 일·주만", [describe("005930.KS").tfs.includes("1M"), describe("NVDA").tfs.includes("1Y"), describe("bn:BTCUSDT").tfs.includes("1M"), describe("cboe:PC_TOTAL").tfs.includes("1M")].map(Number), [1, 1, 1, 0]);
 }
 
+// ── VWAP 밴드 기본 2 · 범례 한마디 (0.26.0) ──
+section("VWAP 1배·2배 (0.26.0)");
+{
+  const { INDICATORS, withDefaults, vwapZone } = await import("../indicators/index.js");
+  check("VWAP 밴드 기본 = 2 (1배·2배)", withDefaults({ id: "vwap" }).params.bands, 2);
+  // VWAP 100, 1배 ±10, 2배 ±20
+  const z = (c) => vwapZone(c, 100, 110, 90, 120, 80);
+  check("범례 한마디: 2배 넘음 · 1~2배 · 1배 안(위·아래) · 반대쪽", [z(125), z(115), z(105), z(95), z(85), z(75)].map((s) => ["+2배 넘음 · 따라 사지 말기", "+1~2배 · 강함", "위 · 보통 범위", "아래 · 보통 범위", "−1~2배 · 약함", "−2배 넘음 · 따라 팔지 말기"].indexOf(s)), [0, 1, 2, 3, 4, 5]);
+  check("밴드 0이면 위·아래만", [vwapZone(101, 100) === "위 · 사는 쪽", vwapZone(99, 100) === "아래 · 파는 쪽"].map(Number), [1, 1]);
+  void INDICATORS;
+  const { obosZone } = await import("../indicators/index.js");
+  const o = (v, v0) => obosZone(v, v0, 70, 30);
+  check("RSI 한마디: 70 위·30 아래 · 막 들어온 봉 · 보통 (앞 봉과 이 봉만 봄)", [o(72, 60), o(25, 40), o(68, 71), o(33, 29), o(50, 55), o(50, null)].map((s) => ["과매수 · 따라 사지 말기", "과매도 · 따라 팔지 말기", "과매수에서 내려옴 · 힘 빠짐", "과매도에서 올라옴 · 반등 기미", "보통"].indexOf(s)), [0, 1, 2, 3, 4, 4]);
+
+}
+
 // ── OKX (0.25.0): 100개씩 주는 거래소를 바이낸스 klines와 같은 약속으로 감싼다 (가짜 거래소로, 인터넷 없이) ──
 section("OKX 무기한선물 (0.25.0)");
 {
