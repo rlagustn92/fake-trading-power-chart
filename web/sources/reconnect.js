@@ -119,7 +119,9 @@ export class ReconnectingWS {
     }
     if (this.o.pingMs && this.open && now - (this.lastPing ?? 0) >= this.o.pingMs) {
       this.lastPing = now;
-      this.send(this.o.ping);
+      // 글자 ping(OKX "ping")은 그대로, 나머지(하이퍼리퀴드 {method:"ping"})는 JSON으로
+      if (typeof this.o.ping === "string") this.ws.send(this.o.ping);
+      else this.send(this.o.ping);
     }
   }
 }

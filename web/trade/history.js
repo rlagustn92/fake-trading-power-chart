@@ -5,6 +5,7 @@
 // - 메타 `종목|봉|replay_from` = "여기부터 지금까지는 빈틈없이 받았음" (0이면 상장일부터 전부) → 중간에 꺼도 이어서
 import * as db from "../core/db.js";
 import * as BN from "../sources/binance.js";
+import * as OK from "../sources/okx.js";
 import * as TS from "../sources/toss.js";
 import { TF_SEC } from "../core/bars.js";
 import { DAY } from "../core/tz.js";
@@ -15,8 +16,10 @@ const PAGE = 1500;
 const PAUSE_MS = 350;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** 이 종목을 과거로 더 받을 수 있나 (Binance만: Hyperliquid는 봉 종류마다 최근 5,000개뿐) */
-export const canBackfill = (info) => info.kind === "perp" && info.daily === "binance";
+/** 이 종목을 과거로 더 받을 수 있나 (Binance·OKX: 상장일부터 다 준다. Hyperliquid는 봉 종류마다 최근 5,000개뿐) */
+export const canBackfill = (info) => info.kind === "perp" && (info.daily === "binance" || info.daily === "okx");
+/** 그 종목의 거래소 (바이낸스·OKX는 klines 모양이 같다, 0.25.0) */
+const EX = (info) => (info.daily === "okx" ? OK : BN);
 
 /** 지금까지 빈틈없이 이어진 덩어리의 첫 봉 (gaps = db.gaps 결과, 오래된 순) */
 export const blockStart = (gaps, first) => (gaps.length ? gaps[gaps.length - 1][1] : first);
@@ -43,13 +46,13 @@ export async function coverage(info) {
  * 저장된 가장 옛 봉 앞을 거래소에서 더 받는다. 한 번에 pages번(1,500봉씩, 5분봉이면 약 15일). 반환: 새로 받은 봉 수 (0 = 상장일까지 왔음)
  */
 export async function fetchOlder(info, tf, pages = 3) {
-  if (!canBackfill(info) || !BN.TF[tf]) return 0;
+  if (!canBackfill(info) || !EX(info).TF[tf]) return 0;
   const r = await db.range(info.id, tf);
   if (!r) return 0;
   let end = r.first;
   let added = 0;
   for (let i = 0; i < pages; i++) {
-    const rows = (await BN.klines(info.symbol, tf, { endSec: end - 1, limit: PAGE })).filter((k) => k.t < end);
+    const rows = (await EX(info).klines(info.symbol, tf, { endSec: end - 1, limit: PAGE })).filter((k) => k.t < end);
     if (rows.length) await db.putBars(info.id, tf, rows);
     added += rows.length;
     if (rows.length < PAGE) {
@@ -68,7 +71,7 @@ export async function fetchOlder(info, tf, pages = 3) {
  * 리플레이 중에 봉을 바꾸거나(15분 → 4시간) 분할 화면의 다른 칸이 같이 갈 때. 한 번에 4,500봉씩 최대 maxCalls번
  */
 export async function reachBack(info, tf, t, { maxCalls = 30 } = {}) {
-  if (!canBackfill(info) || !BN.TF[tf] || !TF_SEC[tf]) return 0;
+  if (!canBackfill(info) || !EX(info).TF[tf] || !TF_SEC[tf]) return 0;
   const want = t - 300 * TF_SEC[tf];
   let added = 0;
   for (let i = 0; i < maxCalls; i++) {
@@ -107,7 +110,7 @@ async function ensureMinutesNow(info, from, to) {
   let start = from;
   let added = 0;
   while (start < to) {
-    const rows = (await BN.klines(info.symbol, "1m", { startSec: start, limit: PAGE })).filter((k) => k.t >= start && k.t < to);
+    const rows = (await EX(info).klines(info.symbol, "1m", { startSec: start, limit: PAGE })).filter((k) => k.t >= start && k.t < to);
     if (!rows.length) break;
     await db.putBars(info.id, "1m", rows);
     added += rows.length;
@@ -161,7 +164,7 @@ async function listedAt(info, tf) {
   const m = await db.metaGet(key);
   if (m != null) return m;
   try {
-    const t = (await BN.klines(info.symbol, tf, { startSec: 0, limit: 1 }))[0]?.t ?? null;
+    const t = (await EX(info).klines(info.symbol, tf, { startSec: 0, limit: 1 }))[0]?.t ?? null;
     if (t != null) await db.metaSet(key, t);
     return t;
   } catch {
@@ -191,7 +194,7 @@ async function spanPlan(info, plan, { onProgress = () => {}, stop = () => false 
       while (!failed && !stop() && next < p.wins.length) {
         const w = p.wins[next++];
         try {
-          const rows = (await BN.klines(info.symbol, p.tf, { startSec: w.s, endSec: w.e - 1, limit: WIN, bulk: true })).filter((k) => k.t >= w.s && k.t < w.e);
+          const rows = (await EX(info).klines(info.symbol, p.tf, { startSec: w.s, endSec: w.e - 1, limit: WIN, bulk: true })).filter((k) => k.t >= w.s && k.t < w.e);
           if (rows.length) await db.putBars(info.id, p.tf, rows);
           added += rows.length;
           w.ok = true;
@@ -420,7 +423,7 @@ async function fillHoles(info, onProgress, tfs = BACKFILL_TFS, after = 0) {
     for (const [a, b] of gaps.slice(0, 40)) {
       let start = a + TF_SEC[tf];
       for (let i = 0; i < 30 && start < b; i++) {
-        const rows = (await BN.klines(info.symbol, tf, { startSec: start, limit: PAGE, bulk: true })).filter((k) => k.t < b);
+        const rows = (await EX(info).klines(info.symbol, tf, { startSec: start, limit: PAGE, bulk: true })).filter((k) => k.t < b);
         if (!rows.length) break;
         await db.putBars(info.id, tf, rows);
         added += rows.length;

@@ -10,15 +10,16 @@ import * as A from "../sources/alpaca.js";
 import * as Y from "../sources/yahoo.js";
 import * as HL from "../sources/hyperliquid.js";
 import * as BN from "../sources/binance.js";
+import * as OK from "../sources/okx.js";
 import * as TS from "../sources/toss.js";
 import * as db from "./db.js";
-import { isDailyTf, TIMEFRAMES } from "./bars.js";
+import { isDailyTf, isLongTf, TIMEFRAMES } from "./bars.js";
 import { DAY, tzOffset } from "./tz.js";
 import { logInfo, listen, invoke, inTauri } from "../platform.js";
 import { marketOpen, noteLastBar } from "./session.js";
 
 const FRESH = { daily: 10 * 60e3, sentiment: 30 * 60e3, intraday: 55e3, yahooIntraday: 60e3, perp: 55e3 };
-const PERP_TFS = TIMEFRAMES;
+const PERP_TFS = TIMEFRAMES.filter((t) => !isLongTf(t)); // 월봉·년봉은 거래소에서 받지 않고 일봉을 묶는다
 
 export function createData(cfg) {
   const bus = new EventTarget();
@@ -80,6 +81,7 @@ export function createData(cfg) {
 
   /** 이 칸이 그릴 데이터를 저장소에 준비 (없으면 받고, 오래됐으면 이어 받기) */
   function ensure(info, tf, { force = false, front = false } = {}) {
+    if (isLongTf(tf)) tf = "1D"; // 월봉·년봉 = 일봉을 묶은 것
     if (info.kind === "ratio") return Promise.all(info.partInfos.map((p) => ensure(p, tf, { force, front }))).then((ns) => ns.reduce((a, b) => a + b, 0));
     if (info.kind === "perp") {
       const key = `${info.id}|${tf}`;
@@ -250,7 +252,8 @@ export function createData(cfg) {
     let s = live.get(key);
     if (!s) {
       s = { info, tf, cbs: new Set(), off: null };
-      if (info.kind === "perp") s.off = I.subscribePerp(info, tf, (row) => s.cbs.forEach((f) => f({ type: "bar", row })));
+      // 월봉·년봉 무기한선물은 거래소 봉 스트림이 없다 → 현재가(quote)로 마지막 봉을 고친다 (cell.js withLiveDaily)
+      if (info.kind === "perp" && !isLongTf(tf)) s.off = I.subscribePerp(info, tf, (row) => s.cbs.forEach((f) => f({ type: "bar", row })));
       live.set(key, s);
     }
     s.cbs.add(cb);
@@ -377,7 +380,7 @@ export function createData(cfg) {
       const info = describe(id);
       if (info.kind === "perp" && !quoteOffs.has(id)) {
         const f = (q) => setQuote(id, q);
-        quoteOffs.set(id, info.daily === "hyperliquid" ? HL.subscribeQuote(info.symbol, f) : BN.subscribeQuote(info.symbol, f));
+        quoteOffs.set(id, info.daily === "hyperliquid" ? HL.subscribeQuote(info.symbol, f) : info.daily === "okx" ? OK.subscribeQuote(info.symbol, f) : BN.subscribeQuote(info.symbol, f));
       } else if (info.kind === "sentiment" || info.kind === "ratio") {
         quoteFromStore(info);
       }
@@ -514,5 +517,5 @@ export function createData(cfg) {
   };
 }
 
-export const TF_NAME = { "1m": "1분", "5m": "5분", "15m": "15분", "30m": "30분", "1h": "1시간", "4h": "4시간", "1D": "일", "1W": "주" };
+export const TF_NAME = { "1m": "1분", "5m": "5분", "15m": "15분", "30m": "30분", "1h": "1시간", "4h": "4시간", "1D": "일", "1W": "주", "1M": "월", "1Y": "년" };
 const tfName = (tf) => `${TF_NAME[tf]}봉`;

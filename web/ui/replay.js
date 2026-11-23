@@ -73,9 +73,13 @@ export function createReplay(root, { cfg, grid, gridBox, toast, onChange, onPrep
     else if (active && master?.bars.length) {
       // 지금 시각 (일·주봉은 날짜, 분봉은 PC 시각)
       const WD = "일월화수목금토";
-      if (["1D", "1W"].includes(master.tf)) {
+      if (isDailyTf(master.tf)) {
         const t = master.bars[master.bars.length - 1].t;
-        status.textContent = `지금: ${ymd(t)} (${WD[new Date(t * 1000).getUTCDay()]})`;
+        const d = new Date(t * 1000);
+        // 월봉·년봉: 봉 날짜(1일·1월 1일)는 요일이 뜻이 없어서 "2022년 4월" · "2022년"
+        if (master.tf === "1M") status.textContent = `지금: ${d.getUTCFullYear()}년 ${d.getUTCMonth() + 1}월`;
+        else if (master.tf === "1Y") status.textContent = `지금: ${d.getUTCFullYear()}년`;
+        else status.textContent = `지금: ${ymd(t)} (${WD[d.getUTCDay()]})`;
       } else {
         const d = new Date(endT * 1000);
         const p = (n) => String(n).padStart(2, "0");

@@ -27,6 +27,7 @@ ALLOWED_HOSTS = {
     "query1.finance.yahoo.com",
     "query2.finance.yahoo.com",
     "fapi.binance.com",
+    "www.okx.com",
     "api.hyperliquid.xyz",
     "cdn.cboe.com",
     "production.dataviz.cnn.io",
@@ -228,6 +229,10 @@ class Handler(SimpleHTTPRequestHandler):
         headers = json.loads(self.headers.get("x-proxy-headers") or "{}")
         if body is not None and "Content-Type" not in headers:
             headers["Content-Type"] = "application/json"
+        # OKX(Cloudflare)는 파이썬 기본 이름(Python-urllib)만 막는다 (error 1010, 2026-11-23 확인) → 이 앱 이름을 그대로 밝힌다.
+        # 브라우저인 척하는 것이 아니다 (EXE는 Tauri http 플러그인이라 원래 막히지 않음, 깃허브 요청과 같은 방식)
+        if host == "www.okx.com" and "User-Agent" not in headers:
+            headers["User-Agent"] = "fake-trading-power-chart (devserver)"
         req = urllib.request.Request(url, data=body if body else None, headers=headers, method="POST" if body else "GET")
         try:
             with urllib.request.urlopen(req, timeout=30) as r:

@@ -6,6 +6,7 @@
 //   NQ=F                선물 (Yahoo)
 //   hl:xyz:XYZ100       Hyperliquid 무기한선물
 //   bn:QQQUSDT          Binance 무기한선물
+//   ok:NVDA-USDT-SWAP   OKX 무기한선물 (0.25.0)
 //   cboe:PC_EQUITY      풋/콜 비율 (CBOE)    cnn:FEAR_GREED  공포·탐욕 (CNN)
 //   ratio:SOXL/AMD      비율 차트 (§3.7)
 
@@ -96,6 +97,24 @@ const SHORT = {
   "^FVX": "US05Y",
 };
 
+/** OKX 주식 선물 중 한국 것은 이름이 영어뿐이라 한글 이름 (종목 찾기에서 "삼성"으로도 나오게) */
+export const OKX_KO = {
+  SAMSUNG: "삼성전자 (OKX 무기한선물)",
+  SKHYNIX: "SK하이닉스 (OKX 무기한선물)",
+  SKHY: "SK하이닉스 (OKX 무기한선물)",
+  EWY: "한국 주식 ETF (OKX 무기한선물)",
+  CSOPSAMSUNG2L: "삼성전자 2배 (OKX 무기한선물)",
+  CSOPSKHYNIX2L: "SK하이닉스 2배 (OKX 무기한선물)",
+  XAU: "금 (OKX 무기한선물)",
+  XAG: "은 (OKX 무기한선물)",
+  CL: "WTI 원유 (OKX 무기한선물)",
+  BZ: "브렌트 원유 (OKX 무기한선물)",
+  NG: "천연가스 (OKX 무기한선물)",
+  XCU: "구리 (OKX 무기한선물)",
+  XPT: "백금 (OKX 무기한선물)",
+  XPD: "팔라듐 (OKX 무기한선물)",
+};
+
 /** 검색에 기본으로 나오는 종목 (지수·금리·환율·선물·심리 지표 등) */
 export const BUILTIN = Object.keys(NAMES);
 
@@ -126,7 +145,7 @@ export function describe(id) {
     volume: true,
     line: false, // 선 차트로만 (심리 지표)
     currency: "USD",
-    tfs: ["1m", "5m", "15m", "30m", "1h", "4h", "1D", "1W"],
+    tfs: ["1m", "5m", "15m", "30m", "1h", "4h", "1D", "1W", "1M", "1Y"],
     yieldLike: false,
     splits: true, // 분할·배당이 있을 수 있음
   };
@@ -151,7 +170,7 @@ export function describe(id) {
       parts: [a, b],
       partInfos: [A, B],
       splits: false,
-      tfs: A.intraday && B.intraday ? A.tfs.filter((t) => B.tfs.includes(t)) : ["1D", "1W"],
+      tfs: A.intraday && B.intraday ? A.tfs.filter((t) => B.tfs.includes(t)) : ["1D", "1W", "1M", "1Y"],
     });
     return info;
   }
@@ -167,6 +186,27 @@ export function describe(id) {
       dayTz: "UTC",
       daily: hl ? "hyperliquid" : "binance",
       intraday: hl ? "hyperliquid" : "binance",
+      symbol: sym,
+      anchor: 0,
+      extAnchor: 0,
+      rth: null,
+      splits: false,
+    });
+    return info;
+  }
+
+  // OKX 무기한선물 (0.25.0): 코인·주식 선물·원자재, 24시간, UTC 일봉
+  if (id.startsWith("ok:")) {
+    const sym = id.slice(3);
+    const base = sym.replace(/-USDT-SWAP$/, "");
+    Object.assign(info, {
+      kind: "perp",
+      label: SHORT[id] ?? `${base} (OKX)`,
+      sub: NAMES[id] ?? OKX_KO[base] ?? "OKX 무기한선물",
+      tz: "UTC",
+      dayTz: "UTC",
+      daily: "okx",
+      intraday: "okx",
       symbol: sym,
       anchor: 0,
       extAnchor: 0,
@@ -265,7 +305,7 @@ export function describe(id) {
   return info;
 }
 
-const SRC = { yahoo: "Yahoo", alpaca: "Alpaca", hyperliquid: "Hyperliquid", binance: "Binance", cboe: "CBOE", cnn: "CNN" };
+const SRC = { yahoo: "Yahoo", alpaca: "Alpaca", hyperliquid: "Hyperliquid", binance: "Binance", okx: "OKX", cboe: "CBOE", cnn: "CNN" };
 
 /** 어디서 받는지: {quote: 머리줄에 보이는 짧은 이름, text: 현재가·일봉·분봉 출처 설명} */
 export function sourcesOf(info, alpaca, toss = false) {
@@ -304,6 +344,11 @@ export function normalizeInput(s, krMarket) {
 function normalizeRaw(s, krMarket) {
   let t = String(s ?? "").trim();
   if (!t) return null;
+  // OKX: ok:samsung → ok:SAMSUNG-USDT-SWAP (이름만 쳐도 되게, 0.25.0)
+  if (/^ok:/i.test(t)) {
+    const s = t.slice(3).toUpperCase();
+    return `ok:${s.includes("-") ? s : `${s}-USDT-SWAP`}`;
+  }
   if (/^(hl|bn|cboe|cnn|ratio):/i.test(t)) {
     const [p, ...rest] = t.split(":");
     return `${p.toLowerCase()}:${rest.join(":")}`;

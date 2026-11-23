@@ -13,7 +13,7 @@ import { createJournal, statTiles, tradeRow, whenText } from "./journal.js";
 import { loadSeries } from "../core/series.js";
 import { TF_NAME } from "../core/data.js";
 import { ymd, DAY } from "../core/tz.js";
-import { TF_SEC } from "../core/bars.js";
+import { TF_SEC, isDailyTf } from "../core/bars.js";
 import { loadFile, saveFile } from "../platform.js";
 import { upColor, downColor, tpColor } from "../core/colors.js";
 
@@ -105,7 +105,7 @@ export async function createTrading(root, { cfg, grid, replay, toast, onToggle, 
   // ── 리플레이에 붙기 (ui/replay.js가 부른다) ──
   /** 시작 전 (replay가 기다린다): Binance 종목은 그 시각 앞 하루 ~ 뒤 사흘 1분봉이 없으면 받아 온다 → 차트를 뒤로 밀어 고른 옛날 구간도 1분봉으로 체결 */
   async function prepare(cell, t) {
-    if (!HIS.canBackfill(cell.info) || ["1D", "1W"].includes(cell.tf)) return;
+    if (!HIS.canBackfill(cell.info) || isDailyTf(cell.tf)) return;
     const slow = setTimeout(() => toast("그때 1분봉을 받는 중… (1~2초)", 2500), 300);
     try {
       await HIS.ensureMinutes(cell.info, t - DAY, t + 3 * DAY);
@@ -673,7 +673,7 @@ export async function createTrading(root, { cfg, grid, replay, toast, onToggle, 
     h("p.tr-hint", "과거 차트를 다시 틀어 놓고 연습해요. 미래 봉은 가려져 있어요."),
     h("button.primary.tr-go", { onclick: () => replay.startRandom() }, "🎲 아무 때나 시작"),
     h("button.tr-go2", { onclick: () => replay.start() }, "📍 차트에서 시작점 고르기"),
-    h("button.tr-go2", { onclick: () => startLive(), "data-tip-text": "지금 보고 있는 차트의 실시간 가격으로 연습해요 (진짜 주문 없음)\n바이낸스 종목은 24시간, 국내·미국 주식은 장중에만 가격이 움직여요" }, "📡 지금 실시간으로"),
+    h("button.tr-go2", { onclick: () => startLive(), "data-tip-text": "지금 보고 있는 차트의 실시간 가격으로 연습해요 (진짜 주문 없음)\n바이낸스·OKX·하이퍼리퀴드 종목은 24시간, 국내·미국 주식은 장중에만 가격이 움직여요" }, "📡 지금 실시간으로"),
     h("div.tr-data", h("b", "차트 봉 (5분·15분·30분·1시간·4시간)"), chartText, chartBtns, h("b", "과거 1분봉"), covText, dlBtns, dlProg)
   );
 
@@ -997,10 +997,13 @@ export async function createTrading(root, { cfg, grid, replay, toast, onToggle, 
       return;
     }
     if (!HIS.canBackfill(info)) {
-      dlBtns.replaceChildren(h("span.tr-hint", info.kind === "perp" ? "Hyperliquid는 최근 3.5일치만 줘요. Binance 종목(bn:…)은 상장일부터 받을 수 있어요." : "원본 앱과 같은 방법으로 받아요 (미국 주식 1분봉은 알파카 키 → 최근 12개월)."));
+      dlBtns.replaceChildren(h("span.tr-hint", info.kind === "perp" ? "Hyperliquid는 최근 3.5일치만 줘요. Binance·OKX 종목은 상장일부터 받을 수 있어요." : "원본 앱과 같은 방법으로 받아요 (미국 주식 1분봉은 알파카 키 → 최근 12개월)."));
       return;
     }
     const btn = (label, days, tip) => h("button", { onclick: () => download(info, { days }), "data-tip-text": tip }, label);
+    // OKX는 한 번에 100봉씩이라 바이낸스(1,000봉)보다 오래 걸린다 (한도의 절반, 1초 5번 → 1분봉 하루치 약 3초)
+    if (info.daily === "okx")
+      return dlBtns.replaceChildren(btn("30일 받기", 30, "최근 30일 1분봉 (OKX는 약 2분)"), btn("90일", 90, "최근 90일 1분봉 (OKX는 약 6분)"), btn("상장일부터", null, "상장일부터 전부 (OKX 주식 선물은 15분쯤, BTC처럼 오래된 코인은 몇 시간)\n리플레이는 필요한 1분봉을 알아서 받아서 꼭 받을 필요는 없어요"));
     dlBtns.replaceChildren(btn("30일 받기", 30, "최근 30일 1분봉 (약 15초)"), btn("90일", 90, "최근 90일 1분봉 (약 40초)"), btn("상장일부터", null, "상장일부터 전부 (최근 상장 종목 1~2분, BTC처럼 오래된 종목은 15분쯤·200MB 넘게)\n리플레이는 필요한 1분봉을 알아서 받아서 꼭 받을 필요는 없어요"));
   }
 
@@ -1015,7 +1018,7 @@ export async function createTrading(root, { cfg, grid, replay, toast, onToggle, 
           : info.kind === "kr"
             ? "야후는 5분봉 60일·1시간봉 2년까지만 줘요. ⚙ 설정 → 데이터에 토스 키를 넣으면 2년씩 더 받을 수 있어요."
             : info.kind === "perp"
-              ? "Hyperliquid는 봉마다 최근 5,000개뿐이에요. Binance 종목(bn:…)은 2년씩 받을 수 있어요."
+              ? "Hyperliquid는 봉마다 최근 5,000개뿐이에요. Binance·OKX 종목은 2년씩 받을 수 있어요."
               : "이 종목은 무료 데이터(야후)가 주는 만큼만 있어요 (5분봉 60일·1시간봉 2년).";
       return chartBtns.replaceChildren(h("span.tr-hint", why));
     }

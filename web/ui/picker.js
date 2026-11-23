@@ -1,19 +1,22 @@
 // 종목 찾기 (SPEC §2.8, §3.9): 티커·한글 이름·초성·브랜드 발음, 비율 차트(SOXL/AMD), 직접 입력.
 // 차트 위에서 그냥 글자를 치면 바로 열린다. Enter = 맨 위 결과, ↑↓로 고르기.
-// 위쪽 탭으로 종류를 나눠 볼 수 있다: 미국 주식 · 미국 ETF · 국내 주식 · 국내 ETF · 지수·환율·공포 · Binance · Hyperliquid
+// 위쪽 탭으로 종류를 나눠 볼 수 있다: 미국 주식 · 미국 ETF · 국내 주식 · 국내 ETF · 지수·환율·공포 · Binance · OKX · Hyperliquid
 import { h } from "./dom.js";
 import { makeQuery, indexOf } from "./search.js";
 import { getStockList, marketOf } from "../core/stocklist.js";
-import { describe, normalizeInput, preferLive } from "../core/symbols.js";
+import { describe, normalizeInput, preferLive, OKX_KO } from "../core/symbols.js";
 import * as Y from "../sources/yahoo.js";
 import * as BN from "../sources/binance.js";
 import * as HL from "../sources/hyperliquid.js";
+import * as OK from "../sources/okx.js";
 
 const KIND = { us: "미국", kr: "국내", index: "지수", yield: "금리", fx: "환율", future: "선물", perp: "24시간 선물", sentiment: "심리 지표", ratio: "비율" };
 
-const PERP_SRC = { binance: "Binance", hyperliquid: "Hyperliquid" };
-const TF_KEYS = ["1m", "5m", "15m", "30m", "1h", "4h", "1D", "1W"];
-const TF_LABEL = { "1m": "1분", "5m": "5분", "15m": "15분", "30m": "30분", "1h": "1시간", "4h": "4시간", "1D": "일", "1W": "주" };
+const PERP_SRC = { binance: "Binance", hyperliquid: "Hyperliquid", okx: "OKX" };
+const PERP_TABS = new Set(["bn", "ok", "hl"]);
+const TAB_OF = { binance: "bn", okx: "ok", hyperliquid: "hl" };
+const TF_KEYS = ["1m", "5m", "15m", "30m", "1h", "4h", "1D", "1W", "1M", "1Y"];
+const TF_LABEL = { "1m": "1분", "5m": "5분", "15m": "15분", "30m": "30분", "1h": "1시간", "4h": "4시간", "1D": "일", "1W": "주", "1M": "월", "1Y": "년" };
 
 const CATS = [
   ["all", "전체"],
@@ -23,6 +26,7 @@ const CATS = [
   ["kr_etf", "국내 ETF"],
   ["index", "지수·환율·공포"],
   ["bn", "Binance 24시간"],
+  ["ok", "OKX 24시간"],
   ["hl", "Hyperliquid 24시간"],
 ];
 
@@ -37,7 +41,7 @@ const SUGGEST = {
 /** 이 종목은 어느 탭에 들어가나 */
 function catOf(it) {
   const d = describe(it.id);
-  if (d.kind === "perp") return d.daily === "binance" ? "bn" : "hl";
+  if (d.kind === "perp") return TAB_OF[d.daily] ?? "hl";
   if (["index", "yield", "fx", "future", "sentiment"].includes(d.kind)) return "index";
   const etf = /ETF|ETN/i.test(it.type ?? "");
   if (d.kind === "kr") return etf ? "kr_etf" : "kr_stock";
@@ -49,7 +53,7 @@ function catOf(it) {
 let perpCatalog = null;
 async function perps(names = new Map()) {
   if (perpCatalog) return perpCatalog;
-  const [bn, xyz, main] = await Promise.all([BN.symbols().catch(() => new Map()), HL.listAll("xyz"), HL.listAll("")]);
+  const [bn, xyz, main, ok] = await Promise.all([BN.symbols().catch(() => new Map()), HL.listAll("xyz"), HL.listAll(""), OK.symbols().catch(() => new Map())]);
   // Binance 선물 종류 (exchangeInfo underlyingType) → 한글, 보여 줄 순서
   const KIND_KO = { EQUITY: "미국 주식·ETF", KR_EQUITY: "한국 주식", HK_EQUITY: "홍콩 주식", CN_EQUITY: "중국 주식", COMMODITY: "원자재", FX: "환율", INDEX: "지수", PREMARKET: "상장 전 (프리마켓)" };
   const ORDER = ["EQUITY", "KR_EQUITY", "HK_EQUITY", "CN_EQUITY", "COMMODITY", "FX", "INDEX", "PREMARKET"];
@@ -63,6 +67,15 @@ async function perps(names = new Map()) {
   const trad = [...bn].filter(([, x]) => x.type === "TRADIFI_PERPETUAL" || x.underlying === "INDEX").sort((a, b) => rank(a[1].underlying) - rank(b[1].underlying) || a[1].base.localeCompare(b[1].base));
   for (const [sym, x] of trad) add(`bn:${sym}`, x.base, KIND_KO[x.underlying] ?? "기타");
   for (const [sym, x] of bn) if (x.type !== "TRADIFI_PERPETUAL" && x.underlying !== "INDEX" && sym.endsWith("USDT")) add(`bn:${sym}`, x.base, "코인");
+  // OKX (0.25.0): 주식 선물 → 원자재 → 코인 순. instCategory 3 = 주식, 4 = 원자재, 1 = 코인. 한국 종목은 한글 이름(OKX_KO)으로도 찾게
+  const OK_KIND = { 3: "주식·ETF", 4: "원자재", 1: "코인" };
+  const okRank = (c) => ({ 3: 0, 4: 1, 1: 2 })[c] ?? 3;
+  const okList = [...ok].sort((a, b) => okRank(a[1].cat) - okRank(b[1].cat) || a[1].base.localeCompare(b[1].base));
+  for (const [inst, x] of okList) {
+    const id = `ok:${inst}`;
+    if (OKX_KO[x.base] && !names.has(id)) names.set(id, OKX_KO[x.base].replace(/ \(OKX 무기한선물\)$/, ""));
+    add(id, x.base, OK_KIND[x.cat] ?? "기타");
+  }
   for (const coin of xyz.sort()) add(`hl:${coin}`, coin.replace(/^xyz:/, ""), "주식·지수·원자재");
   for (const coin of main) if (/^[A-Z0-9]+$/.test(coin)) add(`hl:${coin}`, coin, "코인");
   if (out.length) perpCatalog = out;
@@ -146,14 +159,14 @@ export function createPicker(root, { onPick, onAdd, isWatched, onTf = null, perp
       if (k >= 8 || it.perpFor) return;
       const m = perpOf(it.id);
       if (!m || m.via || (m.mult ?? 1) !== 1 || !PERP_SRC[m.source]) return;
-      const id = `${m.source === "binance" ? "bn" : "hl"}:${m.symbol}`;
+      const id = `${TAB_OF[m.source] ?? "hl"}:${m.symbol}`;
       if (!list.some((x) => x.id === id)) out.push({ id, perpFor: it.id, src: m.source, usd: m.fx === "KRW" });
     });
     return out;
   }
 
   function render() {
-    const perpTab = cat === "bn" || cat === "hl";
+    const perpTab = PERP_TABS.has(cat);
     list.replaceChildren(...(perpTab && items.length ? [h("p.hint", `${items.length}개 · 위에서 이름을 치면 바로 찾아요`)] : []), ...items.slice(0, perpTab ? 1200 : 40).map(row));
     if (!items.length) list.append(h("p.hint", input.value.trim() ? "이 탭에는 찾는 종목이 없어요 · '전체' 탭도 봐 주세요" : "받는 중…"));
     list.querySelector(".cur")?.scrollIntoView({ block: "nearest" });
@@ -180,7 +193,7 @@ export function createPicker(root, { onPick, onAdd, isWatched, onTf = null, perp
   async function search() {
     const text = input.value.trim();
     const my = ++seq;
-    const perpTab = cat === "bn" || cat === "hl";
+    const perpTab = PERP_TABS.has(cat);
     const stocks = perpTab ? await perps(perpNames()) : await getStockList();
     if (my !== seq) return;
     const out = [];
@@ -207,13 +220,13 @@ export function createPicker(root, { onPick, onAdd, isWatched, onTf = null, perp
       for (const id of SUGGEST[cat]) push(byId.get(id) ?? { id });
     } else {
       // 전체·지수 탭: 앱이 기본으로 아는 것 (지수·심리 지표·24시간·자주 보는 ETF)을 종류별로
-      const order = ["index", "us_etf", "us_stock", "bn", "hl", "other"];
+      const order = ["index", "us_etf", "us_stock", "bn", "ok", "hl", "other"];
       const list = stocks.filter((x) => x.builtin || x.desc).sort((a, b) => order.indexOf(catOf(a)) - order.indexOf(catOf(b)));
       for (const s of list) push(s);
     }
     items = perpTab ? out : withPerps(out);
-    // 숫자 하나(1~8)만 쳤으면 맨 위에 "그 봉으로 바꾸기" (Alt+1~8과 같음)
-    if (onTf && cat === "all" && /^[1-8]$/.test(text)) items.unshift({ id: `tf:${text}`, tf: TF_KEYS[+text - 1] });
+    // 숫자 하나(1~9, 0)만 쳤으면 맨 위에 "그 봉으로 바꾸기" (Alt+1~9, Alt+0과 같음. 9 = 월봉, 0 = 년봉)
+    if (onTf && cat === "all" && /^[0-9]$/.test(text)) items.unshift({ id: `tf:${text}`, tf: TF_KEYS[text === "0" ? 9 : +text - 1] });
     cursor = 0;
     render();
     // 영어 이름은 Yahoo에도 물어본다 (목록에 없는 종목)

@@ -8,6 +8,7 @@ import * as A from "../sources/alpaca.js";
 import * as Y from "../sources/yahoo.js";
 import * as HL from "../sources/hyperliquid.js";
 import * as BN from "../sources/binance.js";
+import * as OK from "../sources/okx.js";
 import { TF_SEC, splitList, splitFactorAt } from "./bars.js";
 import { DAY, parseYmd, localDay } from "./tz.js";
 import { logInfo } from "../platform.js";
@@ -207,20 +208,23 @@ export async function ensurePerp(info, tf) {
     await db.putBars(sym, tf, rows);
     n = rows.length;
   } else {
+    // 바이낸스와 OKX는 같은 모양(klines)으로 받는다 (OKX는 sources/okx.js가 100개씩 나눠 받아 1500개로 묶는다)
+    const X = info.daily === "okx" ? OK : BN;
     if (!rng) {
-      // 처음: 최근 1500개 + 앞으로 두 번 더(일·주·4시간봉은 상장 이후 전부일 때가 많다)
-      let rows = await BN.klines(info.symbol, tf);
+      // 처음: 최근 1500개 + 앞으로 두 번 더(일·주·4시간봉은 상장 이후 전부일 때가 많다).
+      // OKX는 1500개가 요청 15번이라 처음에는 1500개만 (더 옛날은 차트를 뒤로 밀면 받는다)
+      let rows = await X.klines(info.symbol, tf);
       await db.putBars(sym, tf, rows);
       n += rows.length;
-      for (let i = 0; i < 2 && rows.length === 1500; i++) {
-        rows = await BN.klines(info.symbol, tf, { endSec: rows[0].t - 1 });
+      for (let i = 0; i < (X === OK ? 0 : 2) && rows.length === 1500; i++) {
+        rows = await X.klines(info.symbol, tf, { endSec: rows[0].t - 1 });
         await db.putBars(sym, tf, rows);
         n += rows.length;
       }
     } else {
       let start = rng.last;
       for (let i = 0; i < 20; i++) {
-        const rows = await BN.klines(info.symbol, tf, { startSec: start });
+        const rows = await X.klines(info.symbol, tf, { startSec: start });
         await db.putBars(sym, tf, rows);
         n += rows.length;
         if (rows.length < 1500) break;
@@ -246,7 +250,7 @@ export function subscribePerp(info, tf, cb) {
     if (!timer) timer = setTimeout(flush, 5000);
     cb(row);
   };
-  const off = info.daily === "hyperliquid" ? HL.subscribeCandles(info.symbol, tf, onRow) : BN.subscribeCandles(info.symbol, tf, onRow);
+  const off = info.daily === "hyperliquid" ? HL.subscribeCandles(info.symbol, tf, onRow) : info.daily === "okx" ? OK.subscribeCandles(info.symbol, tf, onRow) : BN.subscribeCandles(info.symbol, tf, onRow);
   return () => {
     off();
     clearTimeout(timer);

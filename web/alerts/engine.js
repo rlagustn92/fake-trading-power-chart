@@ -8,7 +8,7 @@
 //   op:   up(위로) | down(아래로) | cross(어느 쪽이든)
 import { describe } from "../core/symbols.js";
 import { loadSeries, liveTail } from "../core/series.js";
-import { TF_SEC, isDailyTf, mergeRows, mondayOf } from "../core/bars.js";
+import { TF_SEC, isDailyTf, isLongTf, mergeRows, periodOf, periodEnd } from "../core/bars.js";
 import { DAY, today, localSec, localDay, tzOffset } from "../core/tz.js";
 import { TF_NAME } from "../core/data.js";
 import * as C from "../indicators/calc.js";
@@ -119,11 +119,10 @@ export function createAlerts({ cfg, data, onFire, onChange }) {
     }
     const q = data.quote(info.id);
     if (isDailyTf(tf) && q?.ts && info.kind !== "sentiment") {
-      let day = localDay(info.dayTz, q.ts);
-      if (tf === "1W") day = mondayOf(day);
+      const day = periodOf(tf, localDay(info.dayTz, q.ts));
       const last = bars[bars.length - 1];
       if (day === last.t) bars = [...bars.slice(0, -1), { ...last, c: q.price, h: Math.max(last.h, q.price), l: Math.min(last.l, q.price) }];
-      else if (day > last.t && day - last.t < 10 * DAY) bars = [...bars, { t: day, o: q.price, h: q.price, l: q.price, c: q.price, v: 0 }];
+      else if (day > last.t && (isLongTf(tf) ? day === periodEnd(tf, last.t) : day - last.t < 10 * DAY)) bars = [...bars, { t: day, o: q.price, h: q.price, l: q.price, c: q.price, v: 0 }];
     }
     return bars;
   }
@@ -133,7 +132,7 @@ export function createAlerts({ cfg, data, onFire, onChange }) {
     if (!isDailyTf(tf)) return now >= bar.t + TF_SEC[tf];
     if (info.kind === "sentiment") return true;
     const d = today(info.dayTz);
-    if (tf === "1W") return mondayOf(d) > bar.t;
+    if (tf !== "1D") return periodOf(tf, d) > bar.t; // 주·월·년봉: 다음 주·달·해가 시작되면 끝난 것
     if (d > bar.t) return true;
     const end = info.rth?.[1] ?? (info.kind === "kr" || info.tz === "Asia/Seoul" ? 15.5 * 3600 : null);
     return end != null && localSec(info.tz, now) >= end;
@@ -170,7 +169,7 @@ export function createAlerts({ cfg, data, onFire, onChange }) {
         if (htf) {
           // 상위 봉은 끝난 것만 (차트와 같은 규칙, 미래 값 안 씀)
           const t2 = htfOf(a);
-          const key = isDailyTf(t2) && !isDailyTf(a.tf) ? (t) => (t2 === "1W" ? mondayOf(localDay(info.dayTz, t)) : localDay(info.dayTz, t)) : (t) => t;
+          const key = isDailyTf(t2) && !isDailyTf(a.tf) ? (t) => periodOf(t2, localDay(info.dayTz, t)) : (t) => t;
           vals = mapHtf(bars, htf, calc(htf), { htfKey: key, replaying: false });
         } else vals = calc(bars);
         const out = { x: close, lv: (i) => vals[i] };
@@ -344,7 +343,7 @@ export function createAlerts({ cfg, data, onFire, onChange }) {
     const d = new Date(bar.t * 1000);
     const p2 = (x) => String(x).padStart(2, "0");
     const when = isDailyTf(a.tf) ? `${d.getUTCMonth() + 1}-${p2(d.getUTCDate())}` : `${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
-    const stale = Date.now() / 1000 - (bar.t + (isDailyTf(a.tf) ? DAY : TF_SEC[a.tf])) > (isDailyTf(a.tf) ? 2 * DAY : 3 * TF_SEC[a.tf] + 120);
+    const stale = Date.now() / 1000 - (isLongTf(a.tf) ? periodEnd(a.tf, bar.t) : bar.t + (isDailyTf(a.tf) ? DAY : TF_SEC[a.tf])) > (isDailyTf(a.tf) ? 2 * DAY : 3 * TF_SEC[a.tf] + 120);
     const text = `${stale ? "(앱 꺼진 사이 · " + when + ") " : ""}${alertText(a)}${stale ? "" : ` · ${when}`}`;
     a.fired = [{ at: Date.now(), bar: bar.t, value: v ?? null }, ...(a.fired ?? [])].slice(0, 20);
     if (a.once) a.on = false;

@@ -1,7 +1,7 @@
 // 차트·백테스트가 쓰는 봉 만들기: 저장소에서 읽기 → 분할·배당 반영 → 정규장 거르기 → 봉 묶기
 import * as db from "./db.js";
 import { localDay } from "./tz.js";
-import { TF_SEC, isDailyTf, splitList, dividendMultipliers, adjust, filterSession, aggregate, weekly, ratioBars } from "./bars.js";
+import { TF_SEC, isDailyTf, isLongTf, splitList, dividendMultipliers, adjust, filterSession, aggregate, weekly, groupDaily, ratioBars } from "./bars.js";
 import { baseTf } from "./intraday.js";
 
 /**
@@ -25,7 +25,14 @@ export async function loadSeries(info, tf, { basis = "split", ext = false, befor
     const divMult = basis === "total" ? dividendMultipliers(raw, events) : null;
     let bars = adjust(raw, { splits, divMult, basis });
     if (tf === "1W") bars = weekly(bars);
+    else if (isLongTf(tf)) bars = groupDaily(bars, tf);
     return { bars, events, splits, more: false };
+  }
+
+  // 무기한선물 월봉·년봉: 저장된 일봉 전부를 묶는다 (거래소 월봉을 따로 받지 않는다)
+  if (info.kind === "perp" && isLongTf(tf)) {
+    const raw = await db.getBars(info.id, "1D", { limit: 200000 });
+    return { bars: groupDaily(raw, tf), events: [], splits: [], more: false };
   }
 
   if (info.kind === "perp") {

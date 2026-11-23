@@ -818,10 +818,92 @@ section("📏 자 오른쪽 클릭 — 그리기 도구와 같은 규칙 (0.19.1
   box.remove();
 }
 
+// ── 월봉·년봉 (0.25.0): 일봉을 묶어 만든다. 주봉·일봉은 예전과 똑같아야 한다 ──
+section("월봉 · 년봉 · 주·월 VWAP (0.25.0)");
+{
+  const B = await import("../core/bars.js");
+  const { mapHtf } = await import("../indicators/index.js");
+  const D = (y, m, d) => Date.UTC(y, m - 1, d) / 1000;
+  check("봉 순서: Alt+9 = 월봉, Alt+0 = 년봉 (앞 8개는 그대로)", [B.TIMEFRAMES.indexOf("1W"), B.TIMEFRAMES.indexOf("1M"), B.TIMEFRAMES.indexOf("1Y"), B.TIMEFRAMES.length], [7, 8, 9, 10]);
+  check("일·주·월·년 = 날짜 봉, 월·년 = 일봉을 묶는 봉", [B.isDailyTf("1D"), B.isDailyTf("1W"), B.isDailyTf("1M"), B.isDailyTf("1Y"), B.isDailyTf("4h"), B.isLongTf("1W"), B.isLongTf("1M"), B.isLongTf("1Y")].map(Number), [1, 1, 1, 1, 0, 0, 1, 1]);
+  const mon = D(2026, 11, 25); // 수요일
+  check("periodOf: 2026-11-25 → 일 그대로 · 주 11/23(월) · 월 11/1 · 년 1/1", [B.periodOf("1D", mon), B.periodOf("1W", mon), B.periodOf("1M", mon), B.periodOf("1Y", mon)], [mon, D(2026, 11, 23), D(2026, 11, 1), D(2026, 1, 1)]);
+  check("periodEnd: 2월(28일) → 3/1 · 12월 → 다음 해 1/1 · 년 → 다음 해 · 주 +7일 · 일 +1일", [B.periodEnd("1M", D(2026, 2, 1)), B.periodEnd("1M", D(2026, 12, 1)), B.periodEnd("1Y", D(2026, 1, 1)), B.periodEnd("1W", D(2026, 11, 23)), B.periodEnd("1D", mon)], [D(2026, 3, 1), D(2027, 1, 1), D(2027, 1, 1), D(2026, 11, 30), mon + 86400]);
+  const days = [
+    { t: D(2025, 12, 30), o: 10, h: 12, l: 9, c: 11, v: 100 },
+    { t: D(2025, 12, 31), o: 11, h: 15, l: 10, c: 14, v: 200 },
+    { t: D(2026, 1, 2), o: 14, h: 16, l: 13, c: 15, v: 300 },
+    { t: D(2026, 1, 5), o: 15, h: 15, l: 8, c: 9, v: 400 },
+  ];
+  const mo = B.groupDaily(days, "1M");
+  check("월봉: 12월 = 시10 고15 저9 종14 량300 · 1월 = 시14 고16 저8 종9 량700", mo.flatMap((b) => [b.t, b.o, b.h, b.l, b.c, b.v]), [D(2025, 12, 1), 10, 15, 9, 14, 300, D(2026, 1, 1), 14, 16, 8, 9, 700]);
+  const yr = B.groupDaily(days, "1Y");
+  check("년봉: 2025 · 2026 두 개 (해가 바뀌면 새 봉)", yr.map((b) => [b.t, b.c, b.v]).flat(), [D(2025, 1, 1), 14, 300, D(2026, 1, 1), 9, 700]);
+  check("groupDaily 주봉 = 예전 weekly 그대로 · 일봉은 손대지 않음", [JSON.stringify(B.groupDaily(days, "1W")) === JSON.stringify(B.weekly(days)), B.groupDaily(days, "1D") === days].map(Number), [1, 1]);
+  // 주·월 VWAP: 달이 바뀌면 처음부터 (가격 = (고+저+종)/3)
+  const vb = [
+    { t: D(2026, 1, 30), h: 10, l: 10, c: 10, v: 1 },
+    { t: D(2026, 1, 31), h: 20, l: 20, c: 20, v: 1 },
+    { t: D(2026, 2, 2), h: 30, l: 30, c: 30, v: 2 },
+    { t: D(2026, 2, 3), h: 60, l: 60, c: 60, v: 1 },
+  ];
+  check("월 VWAP: 1월 10 → 15, 2월에 다시 시작 30 → 40", C.vwap(vb, (t) => B.periodOf("1M", t)).vwap, [10, 15, 30, 40]);
+  check("주 VWAP: 1/30(금)·1/31(토) 같은 주, 2/2(월)부터 새 주", C.vwap(vb, (t) => B.periodOf("1W", t)).vwap, [10, 15, 30, 40]);
+  // 리플레이 중 월봉 기준 지표: 그달이 끝났는지는 실제 달 길이로 (30일로 어림하면 31일 달은 하루 일찍, 2월은 이틀 늦게 바뀐다)
+  const htf = [{ t: D(2026, 1, 1) }, { t: D(2026, 2, 1) }];
+  const o = (endT) => ({ htfKey: (x) => x, replaying: true, endT, span: 30 * 86400, endOf: (t) => B.periodEnd("1M", t) });
+  const jan = [{ t: D(2026, 1, 30) }];
+  check("1월 31일에는 1월이 아직 안 끝남 → 직전 값 (미래 값 안 씀)", mapHtf(jan, htf, [100, 200], o(D(2026, 1, 31)))[0], null);
+  const feb = [{ t: D(2026, 2, 27) }];
+  check("3월 1일이 되면 2월(28일)이 끝남 → 2월 값 바로", mapHtf(feb, htf, [100, 200], o(D(2026, 3, 1)))[0], 200);
+  check("주식 종목은 월봉·년봉 있음 · 풋/콜 같은 심리 지표는 그대로 일·주만", [describe("005930.KS").tfs.includes("1M"), describe("NVDA").tfs.includes("1Y"), describe("bn:BTCUSDT").tfs.includes("1M"), describe("cboe:PC_TOTAL").tfs.includes("1M")].map(Number), [1, 1, 1, 0]);
+}
+
+// ── OKX (0.25.0): 100개씩 주는 거래소를 바이낸스 klines와 같은 약속으로 감싼다 (가짜 거래소로, 인터넷 없이) ──
+section("OKX 무기한선물 (0.25.0)");
+{
+  const OK = await import("../sources/okx.js");
+  const { canBackfill } = await import("../trade/history.js");
+  // 가짜 거래소: 1분봉이 listed부터 last까지 매분 (10:00~10:30은 거래 멈춤). OKX처럼 최신 것부터, 최대 100개, after(이전)·before(이후)
+  const listed = 1_000_000 * 60;
+  const last = listed + 1000 * 60;
+  const all = [];
+  for (let t = listed; t <= last; t += 60) if (!(t >= listed + 300 * 60 && t < listed + 600 * 60)) all.push({ t, o: 1, h: 1, l: 1, c: t / 60, v: 1 });
+  let calls = 0;
+  const page = async (id, tf, { after = null, before = null, limit = 100 }) => {
+    calls++;
+    const rows = all.filter((k) => (after == null || k.t * 1000 < after) && (before == null || k.t * 1000 > before));
+    return rows.slice(-Math.min(limit, 100)); // 조건에 맞는 것 중 최신 100개 (시간순)
+  };
+  const kl = OK.makeKlines(page, async () => listed, () => last + 30);
+  const fwd = await kl("X-USDT-SWAP", "1m", { startSec: listed + 50 * 60, limit: 150 });
+  check("앞으로: 시작 시각부터 150개, 시간순, 빈틈 없음", [fwd.length, fwd[0].t, fwd[149].t, fwd.every((k, i) => !i || k.t - fwd[i - 1].t === 60) ? 1 : 0], [150, listed + 50 * 60, listed + 199 * 60, 1]);
+  calls = 0;
+  const first = await kl("X-USDT-SWAP", "1m", { startSec: 0, limit: 1 });
+  check("첫 봉(startSec 0): 1970년부터 훑지 않고 상장 시각으로 바로 → 요청 1번", [first[0]?.t, calls], [listed, 1]);
+  const gap = await kl("X-USDT-SWAP", "1m", { startSec: listed + 250 * 60, limit: 100 });
+  check("거래가 멈췄던 구간(300~600분)을 건너뛰고 이어서", [gap.length, gap[49].t, gap[50].t], [100, listed + 299 * 60, listed + 600 * 60]);
+  const back = await kl("X-USDT-SWAP", "1m", { endSec: listed + 800 * 60, limit: 250 });
+  // 800~600분 = 201개 + 멈췄던 구간 앞 299~251분 = 49개
+  check("뒤로: endSec까지(그 봉 포함) 마지막 250개, 멈춘 구간도 건너 시간순", [back.length, back[back.length - 1].t, back[0].t, back[48].t, back[49].t], [250, listed + 800 * 60, listed + 251 * 60, listed + 299 * 60, listed + 600 * 60]);
+  const back2 = await kl("X-USDT-SWAP", "1m", { endSec: listed + 100 * 60, limit: 1500 });
+  check("뒤로 상장일까지 가면 있는 만큼만 (101개 = 0~100분)", [back2.length, back2[0].t], [101, listed]);
+  const latest = await kl("X-USDT-SWAP", "1m", { limit: 120 });
+  check("아무것도 안 주면 가장 최근 120개", [latest.length, latest[latest.length - 1].t], [120, last]);
+  check("OKX 봉 한 줄 → 거래량은 코인·주식 수(volCcy)", Object.values(OK.toRow(["1795392000000", "61240", "61439.7", "60887.6", "61197.7", "660679.89", "6606.7989", "403985964.8", "0"])), [1795392000, 61240, 61439.7, 60887.6, 61197.7, 6606.7989]);
+  check("일·주봉은 UTC 기준(1Dutc·1Wutc) — 바이낸스·하이퍼리퀴드와 같은 날짜", [OK.TF["1D"] === "1Dutc", OK.TF["1W"] === "1Wutc", OK.TF["1h"] === "1H", OK.TF["1M"] === undefined].map(Number), [1, 1, 1, 1]);
+  const d = describe("ok:NVDA-USDT-SWAP");
+  const s = describe("ok:SAMSUNG-USDT-SWAP");
+  check("ok:NVDA-USDT-SWAP → OKX 무기한선물 · 24시간 · 월봉도", [d.kind === "perp", d.daily === "okx", d.symbol === "NVDA-USDT-SWAP", d.label === "NVDA (OKX)", d.rth === null, d.tfs.includes("1M"), s.sub.startsWith("삼성전자")].map(Number), [1, 1, 1, 1, 1, 1, 1]);
+  const { normalizeInput } = await import("../core/symbols.js");
+  check("직접 입력: ok:samsung → ok:SAMSUNG-USDT-SWAP · 전체 이름은 그대로 · bn:은 예전과 같음", [normalizeInput("ok:samsung") === "ok:SAMSUNG-USDT-SWAP", normalizeInput("OK:nvda-usdt-swap") === "ok:NVDA-USDT-SWAP", normalizeInput("bn:HOODUSDT") === "bn:HOODUSDT"].map(Number), [1, 1, 1]);
+  check("과거 1분봉 받기: 바이낸스·OKX는 됨 · 하이퍼리퀴드는 안 됨", [canBackfill(d), canBackfill(describe("bn:BTCUSDT")), canBackfill(describe("hl:BTC"))].map(Number), [1, 1, 0]);
+}
+
 // ── 모든 화면 파일이 문법 오류 없이 읽히는지 (하나라도 깨지면 EXE가 검은 화면에서 멈춘다) ──
 section("파일 읽기 (문법 오류 없는지)");
 {
-  const MODULES = ["alerts/engine", "backtest/engine", "backtest/view", "config", "core/bars", "core/colors", "core/csv", "core/events", "core/daily", "core/data", "core/db", "core/estimate", "core/intraday", "core/limit", "core/series", "core/session", "core/stocklist", "core/symbols", "core/tz", "drawings/geom", "drawings/layer", "drawings/store", "indicators/calc", "indicators/explain", "indicators/guides", "indicators/index", "indicators/setups", "indicators/sentiment", "indicators/triangle", "platform", "sources/alpaca", "sources/binance", "sources/hyperliquid", "sources/reconnect", "sources/sentiment", "sources/status", "sources/toss", "sources/yahoo", "trade/engine", "trade/history", "trade/journal", "trade/orderlines", "trade/panel", "ui/alerts", "ui/cell", "ui/dialog", "ui/dom", "ui/drawbar", "ui/format", "ui/goto", "ui/grid", "ui/indpanel", "ui/measure", "ui/menu", "ui/picker", "ui/primitives", "ui/replay", "ui/search", "ui/settings", "ui/sidebar", "ui/snapshot", "ui/statusbar", "ui/tip", "ui/toolbar", "ui/update", "ui/welcome"];
+  const MODULES = ["alerts/engine", "backtest/engine", "backtest/view", "config", "core/bars", "core/colors", "core/csv", "core/events", "core/daily", "core/data", "core/db", "core/estimate", "core/intraday", "core/limit", "core/series", "core/session", "core/stocklist", "core/symbols", "core/tz", "drawings/geom", "drawings/layer", "drawings/store", "indicators/calc", "indicators/explain", "indicators/guides", "indicators/index", "indicators/setups", "indicators/sentiment", "indicators/triangle", "platform", "sources/alpaca", "sources/binance", "sources/hyperliquid", "sources/okx", "sources/reconnect", "sources/sentiment", "sources/status", "sources/toss", "sources/yahoo", "trade/engine", "trade/history", "trade/journal", "trade/orderlines", "trade/panel", "ui/alerts", "ui/cell", "ui/dialog", "ui/dom", "ui/drawbar", "ui/format", "ui/goto", "ui/grid", "ui/indpanel", "ui/measure", "ui/menu", "ui/picker", "ui/primitives", "ui/replay", "ui/search", "ui/settings", "ui/sidebar", "ui/snapshot", "ui/statusbar", "ui/tip", "ui/toolbar", "ui/update", "ui/welcome"];
   const broken = [];
   for (const m of MODULES) {
     try {

@@ -19,7 +19,7 @@ export const usd = (n) => `${n >= 0 ? "+" : "−"}$${num(Math.abs(n), 2)}`;
 const cls = (n) => (n > 0 ? "up" : n < 0 ? "down" : "flat");
 const levText = (v) => `${Number((v ?? 1).toFixed(2))}배`; // 소수점 두 자리까지 (3.75배, 10배)
 const short = (tr) => String(tr.label ?? tr.sym ?? "").replace(/ 24h$/, "");
-const daily = (tr) => tr.tf === "1D" || tr.tf === "1W";
+const daily = (tr) => tr.tf === "1D" || tr.tf === "1W" || tr.tf === "1M" || tr.tf === "1Y";
 /** 익절로 끝났는데 수수료 때문에 손해 (분할 매수로 평단이 익절선에 붙었을 때 생긴다) */
 export const tpLoss = (tr) => tr.why === "tp" && tr.net < 0;
 

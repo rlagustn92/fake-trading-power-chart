@@ -7,7 +7,7 @@ import { reconnectAll } from "./sources/reconnect.js";
 import { getStockList, marketOf } from "./core/stocklist.js";
 import { createData, TF_NAME } from "./core/data.js";
 import { createEstimator } from "./core/estimate.js";
-import { TIMEFRAMES, TF_SEC } from "./core/bars.js";
+import { TIMEFRAMES, TF_SEC, isDailyTf, isLongTf } from "./core/bars.js";
 import { createGrid } from "./ui/grid.js";
 import { createToolbar } from "./ui/toolbar.js";
 import { createSidebar } from "./ui/sidebar.js";
@@ -83,7 +83,7 @@ const YAHOO_KEEP = { "1m": "최근 30일", "5m": "최근 60일", "1h": "최근 2
  */
 const prepping = new Map(); // 종목|봉 → 받는 중 (미리 받기와 봉 바꾸기가 겹쳐도 한 번만)
 async function needsPrep(info, tf, t) {
-  if (!info || tf === "1D" || tf === "1W") return false;
+  if (!info || isDailyTf(tf)) return false;
   const r = await db.range(info.id, baseTf(info, tf) ?? tf);
   return !r || !!(canBackfill(info) && TF_SEC[tf] && r.first > t - 300 * TF_SEC[tf]);
 }
@@ -110,7 +110,7 @@ function beforeReplayLoad(info, tf, t) {
  */
 async function prefetchTfs(cell, t) {
   const info = cell?.info;
-  if (!info?.tfs || cell.tf === "1D" || cell.tf === "1W") return;
+  if (!info?.tfs || isDailyTf(cell.tf)) return;
   const need = [];
   const seen = new Set([baseTf(info, cell.tf) ?? cell.tf]);
   for (const tf of ["5m", "15m", "30m", "1h", "4h"]) {
@@ -171,7 +171,7 @@ const grid = createGrid($("#grid"), {
     sidebar?.markCurrent();
     trading?.paintData();
     const c = grid.current;
-    if (c) status?.setMode(["1D", "1W"].includes(c.tf), c.cc.range);
+    if (c) status?.setMode(isDailyTf(c.tf), c.cc.range);
   },
   onCellsChange: () => {
     replay?.checkCells();
@@ -180,7 +180,7 @@ const grid = createGrid($("#grid"), {
     updateWatch();
     trading?.paintData();
     const c = grid.current;
-    if (c) status?.setMode(["1D", "1W"].includes(c.tf), c.cc.range);
+    if (c) status?.setMode(isDailyTf(c.tf), c.cc.range);
   },
   onMeasure: () => toolbar?.paint(),
   onReplayReset: (cell) => replay?.onCellReset(cell),
@@ -203,6 +203,7 @@ const grid = createGrid($("#grid"), {
   // 모의매매: 차트를 왼쪽 끝까지 밀었는데 저장된 봉이 끝났으면 Binance에서 그 앞을 더 받아 온다
   fetchOlder: async (info, tf) => {
     if (!canBackfill(info)) return 0;
+    if (isLongTf(tf)) tf = "1D"; // 월봉·년봉 = 일봉을 묶은 것 → 일봉을 더 받는다
     const j = data.job(`받는 중 ${info.label} ${TF_NAME[tf]}봉 더 옛날`);
     try {
       const n = await fetchOlder(info, tf);
@@ -216,13 +217,15 @@ const grid = createGrid($("#grid"), {
   // 왼쪽 끝 = 받을 수 있는 가장 옛날 → 왜 거기서 끝나는지 한 번 알린다 (받기가 안 되는 줄 알고 헷갈리지 않게)
   // - Binance: 상장일 (예: 삼성전자 무기한선물 2026-06-02) · 종목마다 한 번
   // - Yahoo 국내 분봉: 1시간봉 2년·5분봉 60일·1분봉 30일까지만 준다 (삼성전자 4시간봉이 2024-11부터) · 종목·봉마다 한 번
-  onOldest: (cell, firstT) => {
+  onOldest: async (cell, firstT) => {
     const info = cell.info;
     const name = info.label.replace(/ 24h$/, "");
     if (canBackfill(info)) {
       if (oldestShown.has(info.id)) return;
       oldestShown.add(info.id);
-      toast(`${name}: 바이낸스에 ${ymd(firstT)}부터 있어요 (상장일)\n그보다 옛날 봉은 없어요`, 6000);
+      // 월봉·년봉의 첫 봉은 그달 1일·그해 1월 1일로 적혀 있다 → 실제 첫 일봉 날짜로
+      if (isLongTf(cell.tf)) firstT = (await db.range(info.id, "1D").catch(() => null))?.first ?? firstT;
+      toast(`${name}: ${info.daily === "okx" ? "OKX" : "바이낸스"}에 ${ymd(firstT)}부터 있어요 (상장일)\n그보다 옛날 봉은 없어요`, 6000);
     } else if (info.intraday === "yahoo" && YAHOO_KEEP[baseTf(info, cell.tf)]) {
       const key = `${info.id}|${cell.tf}`;
       if (oldestShown.has(key)) return;
@@ -719,9 +722,10 @@ addEventListener("keydown", (e) => {
     const k = e.key.toLowerCase();
     const ctrl = e.ctrlKey || e.metaKey;
     const c0 = grid.current;
-    if (e.altKey && !ctrl && /^[1-8]$/.test(e.key) && mode === "chart") {
+    // Alt+1~8 = 1분~주봉, Alt+9 = 월봉, Alt+0 = 년봉 (0.25.0)
+    if (e.altKey && !ctrl && /^[0-9]$/.test(e.key) && mode === "chart") {
       e.preventDefault();
-      return grid.setTimeframe(TIMEFRAMES[+e.key - 1]);
+      return grid.setTimeframe(TIMEFRAMES[e.key === "0" ? 9 : +e.key - 1]);
     }
     if (e.altKey && !ctrl && k === "m" && mode === "chart") {
       e.preventDefault();
@@ -730,7 +734,7 @@ addEventListener("keydown", (e) => {
     }
     if (e.altKey && !ctrl && k === "l" && mode === "chart" && c0) {
       e.preventDefault();
-      const daily = ["1D", "1W"].includes(c0.tf);
+      const daily = isDailyTf(c0.tf);
       const cur = c0.cc.scale ?? (daily ? cfg.chart.scale_daily : cfg.chart.scale_intraday);
       return c0.setView({ scale: cur === "log" ? "normal" : "log" });
     }

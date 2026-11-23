@@ -15,6 +15,7 @@
         { "url": "https://query1.finance.yahoo.com/*" },
         { "url": "https://query2.finance.yahoo.com/*" },
         { "url": "https://fapi.binance.com/*" },
+        { "url": "https://www.okx.com/*" },
         { "url": "https://api.hyperliquid.xyz/*" },
         { "url": "https://cdn.cboe.com/*" },
         { "url": "https://production.dataviz.cnn.io/*" },

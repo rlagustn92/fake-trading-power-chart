@@ -3,9 +3,33 @@
 import { DAY, tzOffset } from "./tz.js";
 
 // 30m: 사용자 요청 2026-11-01 (FAKE TRADING 0.12.0). 순서 = 툴바 버튼·Alt+숫자 순서
-export const TF_SEC = { "1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1D": DAY, "1W": 7 * DAY };
+// 1M·1Y (0.25.0, 사용자 요청 2026-11-23): 월봉·년봉. 길이가 달마다 달라서 TF_SEC 값은 "대략"(크기 비교·여유 계산용)이다.
+// 봉의 시작·끝은 periodOf·periodEnd로 구한다. 저장은 하지 않고 언제나 일봉을 묶어 만든다 (무기한선물도)
+export const TF_SEC = { "1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1D": DAY, "1W": 7 * DAY, "1M": 30 * DAY, "1Y": 365 * DAY };
 export const TIMEFRAMES = Object.keys(TF_SEC);
-export const isDailyTf = (tf) => tf === "1D" || tf === "1W";
+export const isDailyTf = (tf) => tf === "1D" || tf === "1W" || tf === "1M" || tf === "1Y";
+/** 월봉·년봉: 거래소·저장소에 따로 없고 일봉을 묶어 만드는 봉 */
+export const isLongTf = (tf) => tf === "1M" || tf === "1Y";
+
+/** 일봉 날짜 값 → 그 날짜가 들어가는 봉(일·주·월·년)의 첫 날짜 값. 주봉 = 그 주 월요일, 월봉 = 1일, 년봉 = 1월 1일 */
+export function periodOf(tf, day) {
+  if (tf === "1W") return mondayOf(day);
+  if (tf === "1M" || tf === "1Y") {
+    const d = new Date(day * 1000);
+    return Date.UTC(d.getUTCFullYear(), tf === "1M" ? d.getUTCMonth() : 0, 1) / 1000;
+  }
+  return day;
+}
+
+/** 그 봉 다음 봉의 첫 날짜 값 (start = periodOf 값) */
+export function periodEnd(tf, start) {
+  if (tf === "1W") return start + 7 * DAY;
+  if (tf === "1M" || tf === "1Y") {
+    const d = new Date(start * 1000);
+    return Date.UTC(d.getUTCFullYear() + (tf === "1Y" ? 1 : 0), d.getUTCMonth() + (tf === "1M" ? 1 : 0), 1) / 1000;
+  }
+  return start + DAY;
+}
 
 /** 분할 목록 [{t: 분할일(날짜 값), r: 새 주식 수 / 옛 주식 수}] — 2:1이면 r=2, 1:4 병합이면 r=0.25 */
 export function splitList(events) {
@@ -113,6 +137,30 @@ export function weekly(daily) {
   let cur = null;
   for (const k of daily) {
     const b = mondayOf(k.t);
+    if (!cur || cur.t !== b) {
+      cur = { t: b, o: k.o, h: k.h, l: k.l, c: k.c, v: k.v };
+      if (k.k) cur.k = k.k;
+      out.push(cur);
+    } else {
+      if (k.h > cur.h) cur.h = k.h;
+      if (k.l < cur.l) cur.l = k.l;
+      cur.c = k.c;
+      cur.v += k.v;
+      if (k.k) cur.k = k.k; // 종가와 같은 날의 값
+      else delete cur.k;
+    }
+  }
+  return out;
+}
+
+/** 일봉 → 그 봉 종류 (주봉은 weekly 그대로, 월봉 = 그달 1일, 년봉 = 그해 1월 1일 날짜로 표기). 일봉은 그대로 */
+export function groupDaily(daily, tf) {
+  if (tf === "1W") return weekly(daily);
+  if (!isLongTf(tf)) return daily;
+  const out = [];
+  let cur = null;
+  for (const k of daily) {
+    const b = periodOf(tf, k.t);
     if (!cur || cur.t !== b) {
       cur = { t: b, o: k.o, h: k.h, l: k.l, c: k.c, v: k.v };
       if (k.k) cur.k = k.k;

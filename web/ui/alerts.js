@@ -4,7 +4,7 @@
 import { h, segment, toggle } from "./dom.js";
 import { describe } from "../core/symbols.js";
 import { TF_NAME } from "../core/data.js";
-import { TIMEFRAMES } from "../core/bars.js";
+import { TIMEFRAMES, isDailyTf } from "../core/bars.js";
 import { SENTIMENT } from "../indicators/sentiment.js";
 import { alertText } from "../alerts/engine.js";
 import { clock } from "./format.js";
@@ -57,7 +57,7 @@ export function createAlertPanel(root, { cfg, alerts, getCell, pickSymbol }) {
     if (kind === "stage") a.stage = f.stage;
     if (kind === "pct" || kind === "vwapdist") a.value = Math.abs(+f.pct || 0);
     if ((kind === "pct" || kind === "vwapdist") && !(a.value > 0)) return toast("%를 확인해 주세요");
-    if ((kind === "vwapdist" || kind === "dayhigh" || kind === "daylow") && ["1D", "1W"].includes(f.tf)) return toast("이 조건은 분봉에서만 돼요 (봉을 5분봉 등으로)");
+    if ((kind === "vwapdist" || kind === "dayhigh" || kind === "daylow") && isDailyTf(f.tf)) return toast("이 조건은 분봉에서만 돼요 (봉을 5분봉 등으로)");
     if ((kind === "price" && !(a.value > 0)) || (kind === "rsi" && !(a.value >= 0 && a.value <= 100))) return toast("값을 확인해 주세요");
     const al = alerts.add(a);
     focus = al.id;

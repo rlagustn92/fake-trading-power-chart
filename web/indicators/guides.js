@@ -6,6 +6,7 @@ import * as C from "./calc.js";
 import * as S from "./setups.js";
 import { Levels, Bands } from "../ui/primitives.js";
 import { upColor, downColor, tpColor, rgba } from "../core/colors.js";
+import { isDailyTf } from "../core/bars.js";
 
 const ENTRY = "#e8eaed"; // 진입선
 const STOP = "#ff8a3d"; // 손절선 (한국식·미국식 봉 색과 안 겹치게 주황)
@@ -170,10 +171,10 @@ const BASE_KO = { "1h": "1시간", "4h": "4시간", "1D": "일봉" };
 export function guideIndicators(T) {
   const { paintLine, paintHist, paintSessionLine, hexA, mapHtf, mapHtfLive, htfOpt, tfMode } = T;
   const liveOpt = (ctx, tf) => {
-    const intraday = ctx.tf !== "1D" && ctx.tf !== "1W";
-    return { htfKey: ctx.htfKeyOf(tf), dayOnly: (tf === "1D" || tf === "1W") && intraday && ctx.isRegular ? (t) => !ctx.isRegular(t) : null };
+    const intraday = !isDailyTf(ctx.tf);
+    return { htfKey: ctx.htfKeyOf(tf), dayOnly: isDailyTf(tf) && intraday && ctx.isRegular ? (t) => !ctx.isRegular(t) : null };
   };
-  const isDaily = (ctx) => ctx.tf === "1D" || ctx.tf === "1W";
+  const isDaily = (ctx) => isDailyTf(ctx.tf); // 일·주·월·년봉
 
   // ── 권총·ㄴ자·50·200 셋업 (같은 계산, 보여 주는 것만 다르다) ──
   const KIND_KO = { pistol: "권총", lshape: "ㄴ자" };

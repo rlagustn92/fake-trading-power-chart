@@ -5,7 +5,7 @@ import { describe, sourcesOf } from "../core/symbols.js";
 import { FOMC_DAYS, earnings } from "../core/events.js";
 import { marketOpen } from "../core/session.js";
 import { loadSeries, liveTail, dataGaps } from "../core/series.js";
-import { TF_SEC, isDailyTf, heikinAshi, mergeRows, mondayOf, bucketOf, applyLiveQuote } from "../core/bars.js";
+import { TF_SEC, isDailyTf, isLongTf, periodOf, periodEnd, heikinAshi, mergeRows, bucketOf, applyLiveQuote } from "../core/bars.js";
 import { PC_TZ, DAY, tzOffset, localDay, parseYmd, ymd } from "../core/tz.js";
 import { TF_NAME } from "../core/data.js";
 import { INDICATORS, withDefaults } from "../indicators/index.js";
@@ -115,7 +115,8 @@ export function createCell(env, cc) {
     rightPriceScale: { borderColor: "#2a2f36", scaleMargins: { top: 0.08, bottom: 0.06 } },
     timeScale: { borderColor: "#2a2f36", timeVisible: true, secondsVisible: false, rightOffset: 6, minBarSpacing: 0.01, tickMarkFormatter: tickFormat },
     crosshair: { mode: 0, vertLine: { color: "#4b5563", labelBackgroundColor: "#2c333d" }, horzLine: { color: "#4b5563", labelBackgroundColor: "#2c333d" } },
-    localization: { locale: "ko-KR", timeFormatter: (t) => chartTime(t, !daily()) },
+    // 월봉은 "26-11월", 년봉은 "2026년" (그 달·해의 1일 날짜가 보이면 그날 봉인 줄 안다)
+    localization: { locale: "ko-KR", timeFormatter: (t) => (tf === "1M" ? `${chartTime(t, false).slice(0, 5)}월` : tf === "1Y" ? `${new Date(t * 1000).getUTCFullYear()}년` : chartTime(t, !daily())) },
   });
 
   function tickFormat(t, type) {
@@ -444,7 +445,7 @@ export function createCell(env, cc) {
       return c ? withHtfTail(c.bars, t) : null;
     },
     /** 지금 봉 시각 → 상위 봉 t의 시각과 비교할 값 (상위 봉마다 따로 — 일봉은 날짜, 15분은 시각. QA N1) */
-    htfKeyOf: (t) => (isDailyTf(t) && !daily() ? (x) => (t === "1W" ? mondayOf(localDay(info.dayTz, x)) : localDay(info.dayTz, x)) : (x) => x),
+    htfKeyOf: (t) => (isDailyTf(t) && !daily() ? (x) => periodOf(t, localDay(info.dayTz, x)) : (x) => x),
     get replaying() {
       return !!replay;
     },
@@ -544,7 +545,7 @@ export function createCell(env, cc) {
   }
   /** 이 칸 봉 시각 → 그 봉이 들어갈 상위 봉 t의 시작 (저장소가 묶는 규칙과 같게) */
   function htfBucketOf(t) {
-    if (isDailyTf(t)) return daily() ? (x) => mondayOf(x) : ctx.htfKeyOf(t);
+    if (isDailyTf(t)) return daily() ? (x) => periodOf(t, x) : ctx.htfKeyOf(t);
     const sec = TF_SEC[t];
     const anchor = ext() ? info.extAnchor : info.anchor;
     return (x) => bucketOf(x, sec, info.tz, anchor ?? 0);
@@ -605,8 +606,7 @@ export function createCell(env, cc) {
     if (!sent || !(cfg.chart.show_sentiment_events ?? true) || !daily() || !bars.length) return markerSets.delete("events");
     const m = [];
     for (const [d, name, v] of sent.events) {
-      let t = parseYmd(d);
-      if (tf === "1W") t = mondayOf(t);
+      const t = periodOf(tf, parseYmd(d));
       const i = lowerBound(bars, (b) => b.t, t);
       if (i >= bars.length || bars[i].t - t > 7 * DAY) continue;
       m.push({ time: time(bars[i].t), position: "aboveBar", shape: "circle", size: 0.5, color: "#ffb020", text: `${name} ${v}` });
@@ -684,7 +684,7 @@ export function createCell(env, cc) {
     const m = [];
     for (const s of splits) {
       // 그날(또는 그 뒤 첫 봉)에 표시
-      const target = tf === "1W" ? mondayOf(s.t) : s.t;
+      const target = periodOf(tf, s.t);
       const dayOf = (b) => (daily() ? b.t : localDay(info.dayTz, b.t));
       const i = lowerBound(bars, dayOf, target);
       if (i >= bars.length) continue;
@@ -1042,8 +1042,7 @@ export function createCell(env, cc) {
   function indexAtMoment(src) {
     if (!bars.length || src?.t == null) return -1;
     if (daily()) {
-      let key = src.daily ? src.t : localDay(info.dayTz, src.t);
-      if (tf === "1W") key = mondayOf(key);
+      const key = periodOf(tf, src.daily ? src.t : localDay(info.dayTz, src.t));
       const i = lowerBound(bars, (b) => b.t, key + 1) - 1;
       return i >= 0 && bars[i].t === key ? i : -1;
     }
@@ -1332,7 +1331,7 @@ export function createCell(env, cc) {
     const my = token;
     const day = parseYmd(dateStr);
     let t;
-    if (daily()) t = tf === "1W" ? mondayOf(day) : day;
+    if (daily()) t = periodOf(tf, day);
     else if (timeStr && zone === "ny") {
       // 뉴욕 시각 → UTC (그날의 서머타임 반영)
       const [hh, mm] = timeStr.split(":").map(Number);
@@ -1375,8 +1374,7 @@ export function createCell(env, cc) {
   function withLiveDaily(list) {
     const q = data.quote(info.id);
     if (!q || !list.length || info.kind === "sentiment" || !q.ts) return list;
-    let day = localDay(info.dayTz, q.ts);
-    if (tf === "1W") day = mondayOf(day);
+    const day = periodOf(tf, localDay(info.dayTz, q.ts));
     const last = list[list.length - 1];
     if (day < last.t) return list;
     const p = q.price; // 오늘 가격은 분할 반영 전후가 같다
@@ -1385,7 +1383,8 @@ export function createCell(env, cc) {
       const nb = { ...last, c: p, h: Math.max(last.h, p), l: Math.min(last.l, p) };
       return [...list.slice(0, -1), nb];
     }
-    if (day - last.t > 10 * DAY) return list;
+    // 월봉·년봉은 바로 다음 달·해일 때만 새 봉 (일·주봉은 예전처럼 10일 안)
+    if (isLongTf(tf) ? day !== periodEnd(tf, last.t) : day - last.t > 10 * DAY) return list;
     return [...list, { t: day, o: p, h: p, l: p, c: p, v: 0 }];
   }
 
@@ -1450,7 +1449,7 @@ export function createCell(env, cc) {
   /** 봉이 끝나는 시각 (일·주봉은 그 날짜·주가 끝나는 현지 자정) */
   function barEnd(b) {
     if (!daily()) return b.t + TF_SEC[tf];
-    const local = b.t + (tf === "1W" ? 7 : 1) * DAY;
+    const local = periodEnd(tf, b.t);
     return local - tzOffset(info.dayTz, local);
   }
   /** endT까지 끝난 봉 수 */
@@ -1488,7 +1487,9 @@ export function createCell(env, cc) {
       setBars(next, "keep");
       // 같이 가는 칸(분할 화면)은 보던 곳이 "지금" 쪽이라 잘린 봉 밖 → 끝 봉 하나만 왼쪽에 보였다 (0.13.0) → 끝 150봉쯤.
       // 시작할 봉을 눌러 고른 칸은 그 봉이 화면 안이라 보던 확대 그대로
-      if (!was || was.from > next.length || was.to < next.length - 5) ts.setVisibleLogicalRange({ from: next.length - 150, to: next.length + 6 });
+      // 월봉·년봉은 봉이 적어서(년봉 20~30개) 150칸이면 왼쪽이 텅 빈다 → 있는 만큼만 (0.25.0)
+      const back = isLongTf(tf) ? Math.min(150, next.length + 3) : 150;
+      if (!was || was.from > next.length || was.to < next.length - 5) ts.setVisibleLogicalRange({ from: next.length - back, to: next.length + 6 });
       else ts.scrollToRealTime();
     } else if (next.length === bars.length || next.length === bars.length + 1) updateBars(next);
     else setBars(next, "follow");

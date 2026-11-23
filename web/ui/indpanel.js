@@ -4,10 +4,10 @@ import { h, stepper, colorPick } from "./dom.js";
 import { INDICATORS, ORDER, PALETTE, SWATCHES, withDefaults } from "../indicators/index.js";
 import { EXPLAIN } from "../indicators/explain.js";
 import { TF_NAME } from "../core/data.js";
-import { TF_SEC } from "../core/bars.js";
+import { TF_SEC, isDailyTf } from "../core/bars.js";
 import { ask } from "./dialog.js";
 
-const TFS = ["", "5m", "15m", "30m", "1h", "4h", "1D", "1W"];
+const TFS = ["", "5m", "15m", "30m", "1h", "4h", "1D", "1W", "1M"];
 
 export function createIndicatorPanel(root, { getCell, apply, cfg }) {
   let focusUid = null;
@@ -31,8 +31,8 @@ export function createIndicatorPanel(root, { getCell, apply, cfg }) {
     const avail = ORDER.map((id) => {
       const d = INDICATORS[id];
       const e = EXPLAIN[id];
-      const off = (d.needsVolume && !info.volume) || (d.intradayOnly && ["1D", "1W"].includes(cell.tf)) || (d.dailyOnly && !["1D", "1W"].includes(cell.tf));
-      const note = d.needsVolume && !info.volume ? "거래량이 없는 종목" : d.intradayOnly && off ? "분봉에서만" : d.dailyOnly && off ? "일·주봉에서만" : "";
+      const off = (d.needsVolume && !info.volume) || (d.intradayOnly && isDailyTf(cell.tf)) || (d.dailyOnly && !isDailyTf(cell.tf));
+      const note = d.needsVolume && !info.volume ? "거래량이 없는 종목" : d.intradayOnly && off ? "분봉에서만" : d.dailyOnly && off ? "일봉·주봉·월봉에서만" : "";
       return h(
         `button.ind-add${off ? ".off" : ""}`,
         {

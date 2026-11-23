@@ -3,7 +3,7 @@
 //   render(bars, from): from=0이면 전체 다시, 아니면 from번째 봉부터만 고침(실시간)
 import * as C from "./calc.js";
 import { BandFill, Levels, VolumeProfile, AutoTriangle, Segments } from "../ui/primitives.js";
-import { TF_SEC } from "../core/bars.js";
+import { TF_SEC, isDailyTf, isLongTf, periodOf, periodEnd } from "../core/bars.js";
 import { findTriangle } from "./triangle.js";
 import { upColor, downColor, rgba } from "../core/colors.js";
 import { guideIndicators, GUIDE_ORDER } from "./guides.js";
@@ -51,7 +51,8 @@ export function mapHtf(bars, htf, vals, o) {
   const key = o.htfKey; // 지금 봉 시각 → 상위 봉과 비교할 값 (상위 봉마다 다르다: 일봉은 날짜, 15분은 시각)
   // 리플레이 중 맨 끝 봉: 그 상위 봉이 리플레이 시각(o.endT)까지 다 지났으면 끝난 봉이니 그 값 (0.16.0).
   // 전에는 늘 직전 상위 봉 값이라, "⏭ 한 칸"으로 15:00 정각에 멈추면 방금 끝난 14시 1시간봉이 아니라 13시 봉 값이 보였다 (한 칸 늦음, 미래 값은 아님)
-  const doneBy = (j0) => o.replaying && o.endT != null && o.span > 0 && key(o.endT) >= htf[j0].t + o.span;
+  // 월봉·년봉은 길이가 달마다 달라서 끝나는 날을 정확히 (o.endOf, 0.25.0)
+  const doneBy = (j0) => o.replaying && o.endT != null && o.span > 0 && key(o.endT) >= (o.endOf ? o.endOf(htf[j0].t) : htf[j0].t + o.span);
   const idx = new Array(bars.length).fill(-1);
   let j = 0;
   for (let i = 0; i < bars.length; i++) {
@@ -70,7 +71,7 @@ export function mapHtf(bars, htf, vals, o) {
 }
 
 /** mapHtf에 넘길 것: 시각 → 비교 값, 리플레이 중인지, 리플레이 시각, 상위 봉 길이(초) — 모든 "기준 봉" 지표가 같이 쓴다 */
-const htfOpt = (ctx, tf) => ({ htfKey: ctx.htfKeyOf(tf), replaying: ctx.replaying, endT: ctx.replayEnd, span: TF_SEC[tf] });
+const htfOpt = (ctx, tf) => ({ htfKey: ctx.htfKeyOf(tf), replaying: ctx.replaying, endT: ctx.replayEnd, span: TF_SEC[tf], endOf: isLongTf(tf) ? (t) => periodEnd(tf, t) : null });
 
 /**
  * 기준 봉(want)과 차트 봉 비교 (0.16.0): "same" 차트 봉으로 계산 · "htf" 큰 봉으로 계산해 계단 · "lower" 차트보다 작은 봉이라 숨김.
@@ -295,8 +296,8 @@ function makeMtfMa(ctx, inst) {
           else if (p.shape === "step") L.vals = mapHtf(bars, htf, ema ? C.ema(close(htf), L.n) : C.sma(close(htf), L.n), htfOpt(ctx, L.tf));
           else {
             // 매끄럽게 (기본): 일·주봉 줄은 정규장 밖 봉(프리·애프터)에서 값이 안 바뀐다 (저장된 일봉이 정규장만이라)
-            const intraday = ctx.tf !== "1D" && ctx.tf !== "1W";
-            const dayOnly = (L.tf === "1D" || L.tf === "1W") && intraday && ctx.isRegular ? (t) => !ctx.isRegular(t) : null;
+            const intraday = !isDailyTf(ctx.tf);
+            const dayOnly = isDailyTf(L.tf) && intraday && ctx.isRegular ? (t) => !ctx.isRegular(t) : null;
             L.vals = mapHtfLive(bars, htf, L.n, ema ? "ema" : "sma", { htfKey: ctx.htfKeyOf(L.tf), dayOnly });
           }
         }
@@ -448,7 +449,7 @@ export const INDICATORS = {
       return {
         series: [hi, lo],
         render(bars, from) {
-          r = C.rollingHighLow(bars, ctx.tf === "1W" ? 52 : 252);
+          r = C.rollingHighLow(bars, { "1W": 52, "1M": 12, "1Y": 1 }[ctx.tf] ?? 252);
           paintLine(hi, bars, r.hi, ctx.time, from);
           paintLine(lo, bars, r.lo, ctx.time, from);
         },
@@ -499,6 +500,52 @@ export const INDICATORS = {
           });
         },
         legend: (i) => [{ label: "VWAP", value: ctx.fmt(r.vwap[i]), color: inst.color }],
+      };
+    },
+  },
+  // 주·월 VWAP (0.25.0, 사용자 요청 2026-11-23: "일봉에서도 보이는 건 이번 주·이번 달 평균가니까 기존 VWAP이랑 분리").
+  // 분봉 전용 VWAP(당일)과 따로. 일·주·월봉에서 그 주·달·해 첫 봉부터 다시 시작. 차트 봉보다 짧은 기간 줄은 숨긴다 (주봉 차트의 '이번 주' = 봉 하나)
+  pvwap: {
+    short: "주·월 VWAP",
+    pane: "price",
+    params: [
+      { key: "week", label: "이번 주", def: true, type: "bool", tip: "일봉에서만 보여요 (주봉 이상은 봉 하나가 한 주라서)" },
+      { key: "month", label: "이번 달", def: true, type: "bool", tip: "일봉·주봉에서 보여요. 주봉은 그 주 월요일이 있는 달로 묶어요" },
+      { key: "year", label: "올해", def: false, type: "bool", tip: "일봉·주봉·월봉에서 보여요 (1월 1일부터의 평균 단가)" },
+    ],
+    color: "#5ec8d8",
+    dailyOnly: true,
+    needsVolume: true,
+    make(ctx, inst) {
+      const p = inst.params;
+      const rows = [
+        { tf: "1W", on: p.week, name: "주", color: inst.color },
+        { tf: "1M", on: p.month, name: "월", color: "#ffb020" },
+        { tf: "1Y", on: p.year, name: "년", color: "#b18cff" },
+      ].filter((L) => L.on && TF_SEC[L.tf] > TF_SEC[ctx.tf]);
+      for (const L of rows) {
+        L.s = ctx.addLine(0, { color: L.color, lineWidth: inst.width ?? 2 });
+        L.key = (t) => periodOf(L.tf, t);
+        L.vals = [];
+      }
+      let last = [];
+      return {
+        series: rows.map((L) => L.s),
+        render(bars, from) {
+          last = bars;
+          for (const L of rows) {
+            L.vals = C.vwap(bars, L.key).vwap;
+            paintSessionLine(L.s, bars, L.vals, ctx, from, L.key);
+          }
+        },
+        legend: (i) => {
+          if (!rows.length) return [{ label: "주·월 VWAP", value: ctx.tf === "1M" && !p.year ? "월봉에선 '올해' 선만 그려요 (꺼져 있음)" : "이 봉에선 숨김 · 일봉에서 보세요", color: inst.color }];
+          const b = last[i];
+          return rows.map((L) => {
+            const v = L.vals[i];
+            return { label: `${L.name} VWAP`, value: v == null ? "—" : `${ctx.fmt(v)}${b ? ` · ${b.c >= v ? "위" : "아래"}` : ""}`, color: L.color };
+          });
+        },
       };
     },
   },
@@ -686,7 +733,7 @@ export const INDICATORS = {
       const hs = ctx.addHist(pane, { priceFormat: fmt });
       hs.createPriceLine({ price: 1, color: "rgba(160,166,174,0.6)", lineStyle: 2, lineWidth: 1, axisLabelVisible: false });
       hs.createPriceLine({ price: 2, color: "rgba(255,138,61,0.7)", lineStyle: 2, lineWidth: 1, axisLabelVisible: false });
-      const atTime = !["1D", "1W"].includes(ctx.tf);
+      const atTime = !isDailyTf(ctx.tf);
       let vals = [];
       return {
         series: [hs],
@@ -897,13 +944,13 @@ export const INDICATORS = {
 };
 
 /** VWAP처럼 세션마다 새로 시작하는 선: 날짜가 바뀌는 첫 봉은 비워서 선이 이어지지 않게 */
-function paintSessionLine(series, bars, vals, ctx, from) {
+function paintSessionLine(series, bars, vals, ctx, from, keyOf = ctx.dayKey) {
   const pts = [];
   let key = null;
   const start = from ? Math.max(0, from) : 0;
   if (!from) {
     for (let i = 0; i < bars.length; i++) {
-      const k = ctx.dayKey(bars[i].t);
+      const k = keyOf(bars[i].t);
       const t = ctx.time(bars[i].t);
       if (k !== key && key !== null) pts.push({ time: t });
       else if (vals[i] != null) pts.push({ time: t, value: vals[i] });
@@ -967,4 +1014,4 @@ export function withDefaults(inst, k = 0) {
 }
 
 /** 지표 목록 화면 순서 */
-export const ORDER = [...GUIDE_ORDER, "sma", "ema", "mtfma", "dualma", "vwma", "bb", "vwbb", "volume", "rvol", "rsi", "rsi_div", "macd", "stoch", "atr", "drawdown", "disparity", "fractals", "hl52", "triangle_auto", "vwap", "vpvr", "orb", "pdhl", "pivots"];
+export const ORDER = [...GUIDE_ORDER, "sma", "ema", "mtfma", "dualma", "vwma", "bb", "vwbb", "volume", "rvol", "rsi", "rsi_div", "macd", "stoch", "atr", "drawdown", "disparity", "fractals", "hl52", "triangle_auto", "vwap", "pvwap", "vpvr", "orb", "pdhl", "pivots"];
