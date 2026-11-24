@@ -97,28 +97,27 @@ export const isBtcUsd = (id) => /BTC/i.test(id ?? "") && !/KRW|EUR|JPY|GBP/i.tes
  * → {text, T(지금 보는 천 단위 또는 null), band(칸 아래 끝 숫자 0·2·4·6·8)}
  */
 export const LADDER_LIFE = 20;
-export const LADDER_OBS = 3; // 반응 뒤 이만큼의 봉까지 "구간 관찰", 그 뒤는 "구간 반응 대기" (23:03 반응 → 23:18 봉 "구간 반응 대기"에 맞춤)
 /*
- * 0.29.0: 위로 뚫을 때도 (23:00 봉이 60,000을 위로 뚫음 → 23:03 봉 저가 60,232.7이 60,200~60,400 칸에 닿고 칸 위에서 마감 = "2-4 반응 발생",
- * 23:18 봉 = "구간 반응 대기"). 아래로 뚫으면 천 단위 아래 칸(8-1K가 바로 붙은 칸), 위로 뚫으면 위 칸(0-2가 붙은 칸), 둘 다 봉의 저가로 칸을 잰다.
- * 반응 = 뚫은 뒤 바로 붙은 칸이 아닌 칸에 처음 닿고 종가가 그 칸 아래 끝 위. 반응 뒤 LADDER_OBS봉은 "구간 관찰", 그 밖에는 "구간 반응 대기".
+ * 0.29.0: 위로 뚫을 때도. 아래로 뚫으면 천 단위 아래 칸(8-1K가 바로 붙은 칸), 위로 뚫으면 위 칸(0-2가 붙은 칸), 둘 다 봉의 저가로 칸을 잰다.
+ * 봉이 그 칸의 위 끝(다음 둥근 숫자)까지 닿으면 = 그 칸의 경계를 시험함 → 칸마다 처음이면 "반응 발생", 두 번째부터 "구간 관찰",
+ * 닿지 않은 봉은 "구간 반응 대기". (23:03 봉 저가 60,232.7·고가 60,408.6 = "2-4 반응 발생", 23:18 봉 고가 60,385 = "구간 반응 대기",
+ * 23:27 봉 고가 60,484 = "2-4 구간 관찰", 22:12 봉 저가 59,711.6·고가 60,014.7 = "6-8 반응 발생" — 방송 캡처 14장과 맞춤)
  */
-export function ladderAt(bars, k, look = 400, life = LADDER_LIFE, obs = LADDER_OBS) {
+export function ladderAt(bars, k, look = 400, life = LADDER_LIFE) {
   let T = null;
   let dir = 0; // −1 아래로 뚫음 · 1 위로 뚫음
   let since = -1;
   let reacted = new Set();
-  let lastR = -1;
-  let rBand = null;
-  let cur = null; // k번 봉 저가가 있는 칸 (붙은 칸이면 null) — "구간 관찰"은 지금 칸 이름으로 (12:09 봉: 4-6에서 반응 뒤 6-8 칸 → "6-8 구간 관찰")
+  let state = "wait"; // k번 봉: "react" · "obs" · "wait"
+  let cur = null; // k번 봉 저가가 있는 칸
   for (let i = Math.max(1, k - look); i <= k; i++) {
     cur = null;
+    state = "wait";
     const c = bars[i].c;
     const t0 = Math.floor(bars[i - 1].c / 1000) * 1000; // 앞 봉 종가가 있던 천 단위
     const fresh = () => {
       since = i;
       reacted = new Set();
-      lastR = -1;
     };
     if (c < t0) {
       T = Math.floor(c / 1000) * 1000 + 1000; // 천 단위를 아래로 뚫은 봉 → 그 천 단위부터 다시
@@ -138,19 +137,17 @@ export function ladderAt(bars, k, look = 400, life = LADDER_LIFE, obs = LADDER_O
     if (low < base || low >= base + 1000) continue; // 천 단위 밖으로 꼬리만 나감
     const band = Math.max(0, Math.min(8, Math.floor((low - base) / 200) * 2));
     const adj = dir < 0 ? band === 8 : band === 0; // 뚫은 천 단위에 바로 붙은 칸
-    if (!adj) cur = band;
-    if (!adj && !reacted.has(band) && c >= base + band * 100) {
+    if (adj) continue;
+    cur = band;
+    if (bars[i].h >= base + (band + 2) * 100) {
+      // 칸의 위 끝(다음 둥근 숫자)까지 닿음
+      state = reacted.has(band) ? "obs" : "react";
       reacted.add(band);
-      lastR = i;
-      rBand = band;
     }
   }
   if (T == null) return { text: "1K 조건 대기", T: null, band: null };
-  if (lastR === k) return { text: `${rBand}-${rBand + 2} 반응 발생`, T, band: rBand };
-  if (lastR >= 0 && k - lastR <= obs) {
-    const b = cur ?? rBand;
-    return { text: `${b}-${b + 2} 구간 관찰`, T, band: b };
-  }
+  if (state === "react") return { text: `${cur}-${cur + 2} 반응 발생`, T, band: cur };
+  if (state === "obs") return { text: `${cur}-${cur + 2} 구간 관찰`, T, band: cur };
   return { text: "구간 반응 대기", T, band: null };
 }
 

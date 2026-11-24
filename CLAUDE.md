@@ -85,7 +85,10 @@ Tauri 2 Windows app for paper trading on replayed charts. It is a clone of `POWE
     - Exchanges fetch native 3m. Stocks build 3m from 1m (`BASE_TF`).
     - 3m is in `BACKFILL_TFS` but not in `CHART_TFS` (2-year downloads).
   - The 나뇨띠 2·4·6·8 row is 3m-only again.
-  - `ladderAt` also handles upward thousand breaks, the first-touch reaction per band, and `LADDER_OBS` = 3 bars of "구간 관찰". It matches all 13 screenshots.
+  - `ladderAt` also handles upward thousand breaks. The band comes from the bar low.
+    - A bar whose high reaches the band's top (the next round hundred) is a test: the first per band shows "반응 발생", later ones "구간 관찰".
+    - Bars that do not reach it show "구간 반응 대기".
+    - 0.29.1 replaced the 0.29.0 "3-bar 관찰" rule after a 23:31 capture. It matches all 14 screenshots.
 - 0.28.0 (0.27.0 folded in, released together):
   - 나뇨띠 지표 (`nanyotti` in guides.js, pure math in `indicators/cloudboard.js`): our reconstruction of streamer 나뇨띠's TradingView table, built from his live-stream screenshots and Binance bars.
     - The user asked for the streamer's name as the indicator name. This is an exception to the "method name, instructor only in the description" rule.
