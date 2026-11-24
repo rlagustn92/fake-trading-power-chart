@@ -4,9 +4,10 @@
 // ④ 한 지표가 켜 둔 봉에 따라 다르게 동작한다 (큰 봉 = 계획, 작은 봉 = 진입 신호) — 지표 설명(explain.js)에 봉별 쓰는 법
 import * as C from "./calc.js";
 import * as S from "./setups.js";
-import { Levels, Bands } from "../ui/primitives.js";
+import * as CB from "./cloudboard.js";
+import { Levels, Bands, Boxes } from "../ui/primitives.js";
 import { upColor, downColor, tpColor, rgba } from "../core/colors.js";
-import { isDailyTf } from "../core/bars.js";
+import { isDailyTf, TF_SEC } from "../core/bars.js";
 
 const ENTRY = "#e8eaed"; // 진입선
 const STOP = "#ff8a3d"; // 손절선 (한국식·미국식 봉 색과 안 겹치게 주황)
@@ -167,6 +168,20 @@ const SIX = [
 const SIX_KO = { up: "정배열 ▲ 롱만", down: "역배열 ▼ 올라올 때 숏", box: "박스 · 위아래 끝에서만 단타", turn: "전환 중 · 확인하고" };
 const stColor = (s) => (s === "up" ? upColor() : s === "down" ? downColor() : "#a0a6ae");
 const BASE_KO = { "1h": "1시간", "4h": "4시간", "1D": "일봉" };
+
+// 나뇨띠 지표 표의 줄마다 마우스를 올리면 뜨는 뜻 (0.28.0, 사용자: "1~9번을 어떻게 해석할지 몰라 · 가이드도 필요")
+// 읽는 순서: 방향(1·2·7) → 위치(4·5·8·9) → 힘(6) → 확인(3)
+const NYT_TIP = {
+  now: "① 방향 — 지금 차트 봉이 구름 위면 롱 우세, 아래면 숏 우세, 안이면 중립\n구름 = 요즘 평균 가격대 띠 (일목균형표 9·26·52)\n끝난 봉으로 계산해요",
+  htf: "① 방향 — 1시간봉·4시간봉의 구름 위치 (위 = 롱 · 안 = 중립 · 아래 = 숏)\n큰 물살이라 이게 더 중요해요\n차트가 1시간봉보다 크면 '범위 밖'",
+  frac: "④ 확인 (추정) — 최근 꼭짓점(프랙탈 고점·저점)을 종가가 넘었나\n'반대 이탈 · 재검토' = 1시간봉 방향과 반대로 깨졌어요 → 생각을 다시\n'같은 방향 돌파' = 1시간봉 방향으로 깨졌어요",
+  gap: "② 위치 — 가격이 구름에서 얼마나 멀리 나갔나 (평소 한 봉 크기 ATR의 몇 배)\n2배 넘으면 '이격 큼' = 고무줄이 너무 늘어난 상태\n따라 사거나 팔면 위험하고, 되돌아올 수 있어요",
+  ladder: "② 위치 (추정) — 비트코인 둥근 숫자 칸\n천 단위(60,000)를 아래로 뚫으면 그 아래 200달러 칸(8-1K · 6-8 · 4-6 …)을 봐요\n'반응 발생' = 그 칸에 닿고 튕겨 올라왔어요\n'1K 조건 대기' = 천 단위를 아직 안 뚫었거나 뚫은 지 1시간이 지났어요\n원래 3분봉 전용 — 우리 앱엔 3분봉이 없어 1·5분봉에서 보여 줘요",
+  act: "③ 힘 — 직전 봉 거래량이 앞 20봉 평균의 몇 배, ATR이 50봉 평균의 몇 배\n1.5배 넘으면 시장이 뜨거워요 (큰 손이 움직임)\n0.5배 아래면 조용해요 (움직임을 믿기 어려워요)",
+  align: "① 방향 (추정) — 지금·1시간·4시간이 다 같은 방향이면 '일치'\n엇갈리면 '미일치' = 조심, 크게 걸지 말기",
+  zone: "② 위치 (우리 방식) — 여러 봉이 좁게 기다가 큰 봉으로 뚫고 나간 자리(손바뀜) 중 가까운 4개\n영역 아래 = 가격이 그 아래 → 올라가다 막힐 수 있어요\n영역 위 = 내려가다 받쳐 줄 수 있어요\n(방송 지표의 규칙은 못 찾아서 숫자는 달라요)",
+  near: "② 위치 — 가장 가까운 매물영역의 가격 범위\n차트의 상자 (분홍 = 막을 자리, 초록 = 받칠 자리)",
+};
 
 export function guideIndicators(T) {
   const { paintLine, paintHist, paintSessionLine, hexA, mapHtf, mapHtfLive, htfOpt, tfMode } = T;
@@ -329,7 +344,8 @@ export function guideIndicators(T) {
       noColor: true,
       params: [
         { key: "look", label: "찾는 봉 수", def: 120, min: 20, max: 2000, step: 10, tip: "최근 이만큼의 봉에서 가장 높은 곳과 가장 낮은 곳을 찾아 이어요 (제가 정한 값)\n키우면 더 큰 움직임을, 줄이면 최근의 작은 움직임을 잡아요" },
-        { key: "unit", label: "단위", def: "std", type: "select", options: [["std", "기본 (23.6 · 38.2 · 50 · 61.8 · 78.6)"], ["q", "0.25 (25 · 50 · 75)"]] },
+        { key: "unit", label: "단위", def: "std", type: "select", options: [["std", "기본 (0.236 · 0.382 · 0.5 · 0.618 · 0.786)"], ["q", "0.25 (0.25 · 0.5 · 0.75)"]] },
+        { key: "ext", label: "1.272 · 2 확장", def: true, type: "bool", tip: "움직임이 끝난 쪽 바깥에 1.272배·2배 자리를 노란 선으로 그려요\n1.272 = 전 고점(저점)을 살짝 넘는 자리, 2 = 그다음 목표" },
       ],
       color: "#a0a6ae",
       make(ctx, inst) {
@@ -338,25 +354,196 @@ export function guideIndicators(T) {
         ctx.attach(lv);
         const STD = [[0, "#a0a6ae"], [0.236, "#ff4d4f"], [0.382, "#ff8a3d"], [0.5, "#4cd5a0"], [0.618, "#5ec8d8"], [0.786, "#3d8bff"], [1, "#a0a6ae"]];
         const QTR = [[0, "#a0a6ae"], [0.25, "#ff8a3d"], [0.5, "#4cd5a0"], [0.75, "#3d8bff"], [1, "#a0a6ae"]];
-        const pct = (v) => `${(v * 100).toFixed(1).replace(/\.0$/, "")}%`;
+        // 확장 (0.28.0): 1.272 = 끝에서 0.272만큼 더 (price(−0.272)), 2 = 움직임 한 번 더 (price(−1))
+        const EXT = [[1.272, -0.272], [2, -1]];
+        const two = (v) => (Math.round(v * 100) / 100).toString();
         let f = null;
         let last = [];
         return {
           series: [],
           prims: [lv],
+          // 0.28.0: 차트가 로그 눈금이면 로그로 나눈다 (Alt+L로 바꾸면 cell.js가 다시 그리게 한다)
+          scaleAware: true,
           render(bars) {
             last = bars;
-            f = bars.length ? S.autoFib(bars, p.look) : null;
-            lv.setData(f ? (p.unit === "q" ? QTR : STD).map(([k, c]) => ({ from: f.from, to: null, price: f.price(k), color: c, dash: k > 0 && k < 1, label: `${pct(k)} ${ctx.fmt(f.price(k))}` })) : []);
+            f = bars.length ? S.autoFib(bars, p.look, bars.length - 1, ctx.log) : null;
+            if (!f) return lv.setData([]);
+            const segs = (p.unit === "q" ? QTR : STD).map(([k, c]) => ({ from: f.from, to: null, price: f.price(k), color: c, dash: k > 0 && k < 1, label: `${k} (${ctx.fmt(f.price(k))})` }));
+            if (p.ext ?? true) for (const [name, k] of EXT) segs.push({ from: f.from, to: null, price: f.price(k), color: "#f5c542", label: `${name} (${ctx.fmt(f.price(k))})` });
+            lv.setData(segs);
           },
           legend(i) {
             const b = last[i];
             if (!f || !b) return [{ label: "자동 피보", value: "—", color: inst.color }];
-            const back = f.up ? (f.H - b.c) / (f.H - f.L) : (b.c - f.L) / (f.H - f.L);
+            const back = f.back(b.c);
             return [
-              { label: `자동 피보 · ${f.up ? "오른" : "내린"} 움직임`, value: `${ctx.fmt(f.up ? f.L : f.H)} → ${ctx.fmt(f.up ? f.H : f.L)}`, color: f.up ? upColor() : downColor() },
-              { label: "지금", value: back < 0 ? "움직임을 넘어섰어요" : back > 1 ? "전부 되돌렸어요 (움직임 무효)" : `${pct(back)} 되돌림`, color: "#c9ced6" },
+              { label: `자동 피보 · ${f.up ? "오른" : "내린"} 움직임${f.log ? " · 로그" : ""}`, value: `${ctx.fmt(f.up ? f.L : f.H)} → ${ctx.fmt(f.up ? f.H : f.L)}`, color: f.up ? upColor() : downColor() },
+              { label: "지금", value: back == null ? "—" : back < 0 ? "움직임을 넘어섰어요" : back > 1 ? "전부 되돌렸어요 (움직임 무효)" : `${two(back)} 되돌림`, color: "#c9ced6" },
             ];
+          },
+        };
+      },
+    },
+
+    // ── 나뇨띠 지표 = 구름 상황판 (0.28.0, 사용자: "구름 상황판을 나뇨띠 지표라고 해서 넣어줘") ──
+    // 방송 화면의 표 9줄을 같은 순서·같은 말로 (계산은 cloudboard.js, 2026-11-24 방송 캡처와 바이낸스 봉으로 맞춤).
+    // 차트에는 일목 구름 두 선 + 매물영역 상자, 표는 오른쪽 위 (cell.js가 handle.panel(i)를 그린다). 신호(롱·숏)는 내지 않는다
+    nanyotti: {
+      short: "나뇨띠 지표",
+      pane: "price",
+      noColor: true,
+      params: [
+        { key: "board", label: "오른쪽 위 표", def: true, type: "bool", tip: "방송 화면처럼 9줄 표를 차트 오른쪽 위에 띄워요\n표 제목을 누르면 접혀요 (한 줄만)" },
+        { key: "cloud", label: "구름 선", def: true, type: "bool", tip: "일목균형표 구름의 위·아래 끝 (흰 선 두 줄)\n트레이딩뷰 기본 9·26·52, 26칸 앞으로 민 값" },
+        { key: "zones", label: "매물영역 상자", def: true, type: "bool", tip: "가까운 매물영역 4개를 상자로 그려요\n분홍 = 위에서 막을 자리, 초록 = 아래에서 받칠 자리\n(그 사람 규칙은 못 찾아서 우리 방식이에요)" },
+      ],
+      color: "#e8eaed",
+      make(ctx, inst) {
+        const p = inst.params;
+        const lineOpt = { color: "rgba(232,234,237,0.8)", lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false };
+        const sA = (p.cloud ?? true) ? ctx.addLine(0, lineOpt) : null;
+        const sB = (p.cloud ?? true) ? ctx.addLine(0, lineOpt) : null;
+        const boxes = new Boxes();
+        ctx.attach(boxes);
+        let last = [];
+        let lastN = -1;
+        let cl = null;
+        let atr = [];
+        let rv = null;
+        const zoneCache = new Map();
+        const htfCache = new Map();
+        const span = () => TF_SEC[ctx.tf] ?? 60;
+        // 매물영역을 찾는 봉: 15분보다 작은 차트는 15분봉, 그 밖에는 차트 봉 (방송: 3·5분 차트 "15m 4개", 일봉 차트 "1D 4개")
+        const zoneTf = () => (span() < TF_SEC["15m"] ? "15m" : ctx.tf);
+        /** 마감 기준: 차트 맨 끝 봉이 아직 안 끝났으면 그 앞 봉으로 계산 (방송 표와 같다) */
+        const closedIdx = (i) => {
+          if (i < 0 || !last[i]) return -1;
+          if (i < last.length - 1) return i;
+          const now = ctx.replaying ? ctx.replayEnd : Date.now() / 1000;
+          return now != null && last[i].t + span() <= now ? i : i - 1;
+        };
+        /** 큰 시간봉 구름을 차트 봉에 맞춘 것 {a, b} · 차트보다 작은 봉이면 {out} · 아직 읽는 중이면 null */
+        const htfCloud = (tf) => {
+          const mode = tfMode(tf, ctx.tf);
+          if (mode === "lower") return { out: true };
+          if (mode === "same") return cl;
+          const hb = ctx.htf(tf);
+          if (!hb || hb.length < 80) return null;
+          const key = `${tf}|${hb.length}|${hb[hb.length - 1].t}|${last.length}`;
+          if (!htfCache.has(key)) {
+            const hc = CB.ichimokuCloud(hb);
+            const o = htfOpt(ctx, tf);
+            htfCache.clear();
+            htfCache.set(key, { a: mapHtf(last, hb, hc.a, o), b: mapHtf(last, hb, hc.b, o) });
+          }
+          return htfCache.get(key);
+        };
+        const firstAtOrAfter = (t) => {
+          let lo = 0;
+          let hi = last.length;
+          while (lo < hi) {
+            const m = (lo + hi) >> 1;
+            if (last[m].t < t) lo = m + 1;
+            else hi = m;
+          }
+          return lo;
+        };
+        /** k번 봉이 끝날 때까지 끝난 매물영역 봉으로 찾은 상자 → {list: 가까운 4개, zb, from(상자마다 차트 봉 번호)} */
+        const zonesAt = (k) => {
+          const zt = zoneTf();
+          const same = zt === ctx.tf;
+          const src = same ? last : ctx.htf(zt);
+          if (k < 0 || !src) return { list: [], zb: [] };
+          const cut = last[k].t + span();
+          let n = same ? k + 1 : src.length;
+          if (!same) while (n > 0 && src[n - 1].t + TF_SEC[zt] > cut) n--;
+          const key = `${zt}|${n}|${k}`;
+          if (!zoneCache.has(key)) {
+            if (zoneCache.size > 300) zoneCache.clear();
+            const zb = src.slice(0, n);
+            const list = CB.nearZones(CB.boxZones(zb), last[k].c, 4);
+            zoneCache.set(key, { list, zb, from: list.map((z) => (same ? z.s : firstAtOrAfter(zb[z.s].t))) });
+          }
+          return zoneCache.get(key);
+        };
+        const P = (x) => (x === "above" || x === "below" || x === "inside" ? x : null);
+        const posColor = (x) => (x === "above" ? upColor() : x === "below" ? downColor() : "#a0a6ae");
+        /** i번 봉 자리의 표 (마우스로 옛 봉을 가리키면 그때의 표 — 미래 봉 안 봄) */
+        const boardAt = (i) => {
+          const k = closedIdx(i);
+          if (k < 60 || !cl) return null;
+          const b = last[k];
+          const f = ctx.fmt;
+          const now = CB.cloudPos(b.c, cl.a[k], cl.b[k]);
+          const posOf = (H) => (H == null ? "loading" : H.out ? "out" : CB.cloudPos(b.c, H.a[k], H.b[k]));
+          const p1 = posOf(htfCloud("1h"));
+          const p4 = posOf(htfCloud("4h"));
+          const htfTxt = (name, x) => `${name} ${x === "out" ? "범위 밖" : x === "loading" ? "읽는 중" : CB.POS_KO[x] ?? "—"}`;
+          const fr = CB.fractalState(last, k, p1 === "above" ? 1 : p1 === "below" ? -1 : 0);
+          const gap = CB.cloudGap(b.c, cl.a[k], cl.b[k], atr[k]);
+          // 우리 앱엔 3분봉이 없어서 1분·5분봉에서도 본다 (원래 "3분봉 전용"). 뚫은 뒤 보는 시간은 1시간으로 같게
+          const lad = !CB.isBtcUsd(ctx.info?.id) ? "BTC USD계열 전용" : span() > TF_SEC["5m"] ? "3분봉 전용 (앱: 1·5분봉)" : CB.ladderAt(last, k, Math.round(72000 / span()), Math.round(3600 / span())).text;
+          const act = CB.activityAt(atr, rv, k);
+          const align = CB.alignText(now, P(p1), P(p4));
+          const zs = zonesAt(k);
+          const nz = CB.nearestZone(zs.list, b.c);
+          const zt = zoneTf();
+          const rows = [
+            { label: "현재 추세", value: CB.trendText(now), color: posColor(now), tip: NYT_TIP.now },
+            { label: "큰 시간봉", value: `${htfTxt("1H", p1)} / ${htfTxt("4H", p4)}`, color: "#e8eaed", tip: NYT_TIP.htf },
+            { label: "프랙탈", value: fr.text, color: /반대/.test(fr.text) ? "#ffb020" : "#c9ced6", tip: NYT_TIP.frac },
+            { label: "구름 이격", value: CB.gapText(gap), color: gap != null && Math.abs(gap) >= CB.GAP_BIG ? "#ffb020" : "#c9ced6", tip: NYT_TIP.gap },
+            { label: "2·4·6·8", value: lad, color: /반응 발생/.test(lad) ? "#4cd5a0" : "#ffffff", bold: true, tip: NYT_TIP.ladder },
+            { label: "시장 활동", value: `거래량 ${CB.xText(act.vol)} / ATR ${CB.xText(act.atr)}`, color: "#ffffff", bold: true, tip: NYT_TIP.act },
+            { label: "관찰 기준", value: align, color: /일치 ·/.test(align) ? posColor(now) : "#c9ced6", tip: NYT_TIP.align },
+            { label: "매물영역", value: nz ? `${zt} ${zs.list.length}개 · 영역 ${nz.where}` : `${zt} 없음`, color: "#f5c542", tip: NYT_TIP.zone },
+            { label: "가까운 영역", value: nz ? `${f(nz.z.lo)} ~ ${f(nz.z.hi)}` : "—", color: "#ffffff", bold: true, tip: NYT_TIP.near },
+          ];
+          const summary = CB.summaryOf({
+            now,
+            h1: P(p1),
+            h4: P(p4),
+            gap,
+            ladder: lad,
+            near: nz && { where: nz.where, price: f(nz.where === "아래" ? nz.z.lo : nz.z.hi) },
+            fr: fr.text,
+            align: align === "큰 방향 미일치" ? false : null,
+          });
+          return { rows, summary, now, p1, p4 };
+        };
+        const drawBoxes = () => {
+          if (!(p.zones ?? true)) return boxes.setData([]);
+          const zs = zonesAt(closedIdx(last.length - 1));
+          boxes.setData(zs.list.map((z, n) => ({ from: zs.from[n], to: null, lo: z.lo, hi: z.hi, color: z.kind === "res" ? "#ff6fae" : "#4cd5a0", label: "매물영역" })));
+        };
+        return {
+          series: [sA, sB].filter(Boolean),
+          prims: [boxes],
+          render(bars, from) {
+            last = bars;
+            // 끝난 봉으로만 계산하니 진행 중 봉이 움직일 때는 다시 셀 것이 없다 (구름 선도 앞으로 민 값이라 그대로)
+            if (from && bars.length === lastN) return;
+            lastN = bars.length;
+            cl = CB.ichimokuCloud(bars);
+            atr = C.atr(bars, 14);
+            rv = ctx.info?.volume ? C.rvol(bars, 20) : null;
+            zoneCache.clear();
+            htfCache.clear();
+            if (sA) paintLine(sA, bars, cl.a, ctx.time, 0);
+            if (sB) paintLine(sB, bars, cl.b, ctx.time, 0);
+            drawBoxes();
+          },
+          legend(i) {
+            const bd = boardAt(i);
+            if (!bd) return [{ label: "나뇨띠 지표", value: "봉이 모자라요 (60봉 넘게 필요)", color: inst.color }];
+            return [{ label: "나뇨띠 지표", value: `${CB.trendText(bd.now)} · ${bd.summary}`, color: inst.color }];
+          },
+          // 오른쪽 위 표 (cell.js): {title, rows, summary, foot}
+          panel(i) {
+            if (!(p.board ?? true)) return null;
+            const bd = boardAt(i);
+            if (!bd) return null;
+            return { title: "나뇨띠 지표", sub: "추정판", rows: bd.rows, summary: bd.summary, foot: "마감 기준 · 끝난 봉으로 계산 · ✦◆ 표시는 없음" };
           },
         };
       },
@@ -1044,4 +1231,4 @@ export function guideIndicators(T) {
 }
 
 /** 지표 창 순서 (맨 위에 모아서 보여 준다) */
-export const GUIDE_ORDER = ["rplan", "regime", "sixma", "pull20", "setup50", "pistol", "lshape", "vwapswing", "barread", "autofib"];
+export const GUIDE_ORDER = ["rplan", "regime", "sixma", "pull20", "setup50", "pistol", "lshape", "vwapswing", "barread", "autofib", "nanyotti"];

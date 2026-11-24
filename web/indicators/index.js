@@ -685,6 +685,7 @@ export const INDICATORS = {
       return {
         series: [],
         prims: [prim],
+        scaleAware: true, // 0.28.0: Alt+L로 눈금을 바꾸면 바로 다시 찾는다
         render(bars, from) {
           // 새 봉이 생길 때만 다시 찾는다 (실시간으로 마지막 봉만 바뀌면 그대로)
           if (from && bars.length === lastN && !tri?.breakout) return;

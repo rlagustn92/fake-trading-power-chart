@@ -60,6 +60,19 @@ const FIB_Q = [
   [0.75, "#3d8bff"],
   [1, "#a0a6ae"],
 ];
+// 확장 자리 (0.28.0, 사용자가 본 양봉업자 강의: 1.272 = 반등이 끝나는 자리, 2 = 그다음 목표). 강의 그림처럼 노란색
+const FIB_EXT = [1.272, 2];
+const EXT_COLOR = "#f5c542";
+/**
+ * 피보 한 자리의 가격 (0.28.0): a = 1 자리, b = 0 자리. log면 log 가격에서 나눈다 (트레이딩뷰 피보의 '로그 스케일'과 같은 값).
+ * 확장은 fibPrice(끝, 시작, k) = 시작 + (끝 − 시작) × k.
+ */
+export function fibPrice(a, b, lv, log) {
+  if (log && a > 0 && b > 0) return Math.exp(Math.log(b) + (Math.log(a) - Math.log(b)) * lv);
+  return b + (a - b) * lv;
+}
+/** 피보 글자: "0.5 (103.97)" (트레이딩뷰·강의 화면과 같은 모양, 0.28.0 전에는 "50%  103.97") */
+export const fibLabel = (lv, priceText) => `${lv} (${priceText})`;
 /** 알림을 걸 수 있는 그림 (가격이 이 선을 넘으면) */
 export const ALERTABLE = new Set(["trend", "info", "hline", "hray", "triangle", "avwap"]);
 const FONT = '"Segoe UI", "Malgun Gothic", sans-serif';
@@ -172,14 +185,27 @@ export function createDrawings(o) {
         const xr = dw.extR ? W + 10 : Math.max(A.x, B.x);
         s.segs.push([A.x, A.y, B.x, B.y, "dash"]);
         let prevY = null;
+        const a = dw.pts[0].p; // 1 자리 (처음 찍은 점)
+        const b0 = dw.pts[1].p; // 0 자리 (나중 찍은 점)
         for (const [lv, c] of dw.q ? FIB_Q : FIB) {
-          const price = dw.pts[1].p + (dw.pts[0].p - dw.pts[1].p) * lv;
+          const price = fibPrice(a, b0, lv, dw.log);
           const y = yOf(price);
           if (y == null) continue;
           s.segs.push([xl, y, xr, y, null, c]);
           if (prevY != null) s.fills.push({ poly: [[xl, prevY], [xr, prevY], [xr, y], [xl, y]], color: c, alpha: 0.06 });
-          s.texts.push({ x: xl - 6, y, text: `${(lv * 100).toFixed(1).replace(/\.0$/, "")}%  ${fmt(price, v)}`, color: c, align: "right" });
+          s.texts.push({ x: xl - 6, y, text: fibLabel(lv, fmt(price, v)), color: c, align: "right" });
           prevY = y;
+        }
+        // 1.272 · 2 (0.28.0): 움직임이 끝난 쪽(오른쪽에 있는 점) 바깥. 찍은 순서와 상관없이 같은 자리 — 강의처럼 바닥→꼭대기면 꼭대기 위
+        if (dw.ext) {
+          const [st, en] = B.L >= A.L ? [a, b0] : [b0, a];
+          for (const k of FIB_EXT) {
+            const price = fibPrice(en, st, k, dw.log);
+            const y = price > 0 || !dw.log ? yOf(price) : null;
+            if (y == null) continue;
+            s.segs.push([xl, y, xr, y, null, EXT_COLOR]);
+            s.texts.push({ x: xl - 6, y, text: fibLabel(k, fmt(price, v)), color: EXT_COLOR, align: "right" });
+          }
         }
         break;
       }
@@ -375,7 +401,7 @@ export function createDrawings(o) {
     if (draft) {
       const pts = [...draft.pts, draft.hover].filter(Boolean);
       const st = draft.type === "brush" ? brushStyle(cfg) : { color: START_COLOR[draft.type], width: 2 }; // 그리는 동안에도 고른 브러시 색·두께로
-      const s = shapeOf({ id: "draft", type: draft.type, pts, color: st.color, width: st.width, extR: draft.type === "fib", q: !!cfg.chart.fib_quarter }, m, ax);
+      const s = shapeOf({ id: "draft", type: draft.type, pts, color: st.color, width: st.width, extR: draft.type === "fib", q: !!cfg.chart.fib_quarter, log: !!o.view().log, ext: fibExtOn() }, m, ax);
       if (s) shapes.push({ dw: { id: "draft" }, s, draft: true });
     } else if (aim && tool) {
       const s = shapeOf({ id: "draft", type: "trend", pts: [aim], color: START_COLOR[tool], width: 2 }, m, ax);
@@ -715,6 +741,11 @@ export function createDrawings(o) {
     const st = d.type === "brush" ? brushStyle(cfg) : { color: START_COLOR[d.type], width: d.type === "hline" || d.type === "hray" ? 1 : 2 };
     const dw = { id: newId(), type: d.type, pts: d.type === "brush" ? d.pts : d.pts.slice(0, TOOLS[d.type].n), color: st.color, width: st.width, extL: false, extR: d.type === "fib", locked: false };
     if (d.type === "fib" && cfg.chart.fib_quarter) dw.q = true;
+    // 0.28.0: 로그 눈금에서 그으면 로그로 나눈다 (그은 순간 정해짐 — 나중에 눈금을 바꿔도 숫자 그대로). 1.272·2는 마지막 선택을 따른다 (처음엔 켬)
+    if (d.type === "fib") {
+      dw.log = !!o.view().log;
+      dw.ext = fibExtOn();
+    }
     aim = null;
     // 계속 그리기면 도구를 그대로 두고 바로 다음 것을 그린다. 추세선은 막대를 띄워 둔다 → 세 번째 클릭으로 바로 평행선 (0.20.0)
     if (cfg.chart.keep_draw_tool ?? true) selId = LINE_LIKE.has(d.type) ? dw.id : null;
@@ -789,6 +820,15 @@ export function createDrawings(o) {
     cfg.save();
     update(dw.id, { q });
   }
+  /** 1.272·2 확장 (0.28.0): 처음엔 켬, 마지막에 고른 것을 다음 피보의 기본으로 기억 */
+  function fibExtOn() {
+    return cfg.chart.fib_ext ?? true;
+  }
+  function setFibExt(dw, on) {
+    cfg.chart.fib_ext = on;
+    cfg.save();
+    update(dw.id, { ext: on });
+  }
 
   function paintBar() {
     const dw = list().find((x) => x.id === selId);
@@ -810,7 +850,9 @@ export function createDrawings(o) {
       lineLike ? b("← 연장", dw.extL, () => update(dw.id, { extL: !dw.extL }), "왼쪽으로 화면 끝까지 늘리기") : null,
       lineLike || dw.type === "fib" ? b("연장 →", dw.extR, () => update(dw.id, { extR: !dw.extR }), "오른쪽으로 화면 끝까지 늘리기") : null,
       lineLike ? parallel("∥ 평행선") : null,
-      dw.type === "fib" ? [[false, "기본", "원래 피보나치: 23.6 · 38.2 · 50 · 61.8 · 78.6%"], [true, "0.25", "0.25 단위: 25 · 50 · 75%"]].map(([q, l, tip]) => b(l, !!dw.q === q, () => setFibQ(dw, q), `${tip}\n다음에 긋는 피보도 이 단위로 시작해요`)) : null,
+      dw.type === "fib" ? [[false, "기본", "원래 피보나치: 0.236 · 0.382 · 0.5 · 0.618 · 0.786"], [true, "0.25", "0.25 단위: 0.25 · 0.5 · 0.75"]].map(([q, l, tip]) => b(l, !!dw.q === q, () => setFibQ(dw, q), `${tip}\n다음에 긋는 피보도 이 단위로 시작해요`)) : null,
+      dw.type === "fib" ? b("로그", !!dw.log, () => update(dw.id, { log: !dw.log }), "로그로 나누기 (트레이딩뷰 피보의 '로그 스케일')\n켜면: 0.5 = 두 점의 % 한가운데 (49 → 218이면 104)\n끄면: 0.5 = 두 점의 금액 한가운데 (49 → 218이면 134)\n로그 눈금 차트에서 그으면 처음부터 켜져요\n몇 년짜리 큰 움직임은 켜고, 분봉의 작은 움직임은 거의 같아요") : null,
+      dw.type === "fib" ? b("1.272 · 2", !!dw.ext, () => setFibExt(dw, !dw.ext), "확장 자리 (노란 선)\n움직임이 끝난 쪽 바깥에 1.272배·2배 자리를 그려요\n바닥 → 꼭대기 움직임이면 꼭대기 위\n다음에 긋는 피보도 이대로 시작해요") : null,
       b(dw.locked ? "🔒" : "🔓", dw.locked, () => update(dw.id, { locked: !dw.locked }), "잠금: 실수로 옮기지 않게"),
       ALERTABLE.has(dw.type) ? b("🔔", false, () => o.onAlert?.(dw), "알림 만들기\n가격(종가)이 이 선을 넘으면 알려줘요") : null,
       b("🗑", false, () => remove(dw.id), "지우기 (Delete)"),

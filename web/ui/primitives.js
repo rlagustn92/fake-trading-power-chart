@@ -291,6 +291,55 @@ export class Segments extends Base {
   }
 }
 
+/**
+ * 가격 상자 (0.28.0 나뇨띠 지표의 매물영역). boxes: [{from: 봉 번호, to: 봉 번호(없으면 오른쪽 끝까지), lo, hi, color, label}]
+ * 반투명 칠 + 테두리 + 오른쪽 위 이름표
+ */
+export class Boxes extends Base {
+  constructor() {
+    super();
+    this.boxes = [];
+    this._views = [viewOf((t) => this.draw(t), "bottom")];
+  }
+  setData(boxes) {
+    this.boxes = boxes;
+    this.update();
+  }
+  paneViews() {
+    return this._views;
+  }
+  draw(target) {
+    if (!this.chart || !this.boxes.length) return;
+    const ts = this.chart.timeScale();
+    const W = ts.width();
+    target.useMediaCoordinateSpace(({ context: ctx }) => {
+      ctx.font = '12px "Segoe UI", "Malgun Gothic", sans-serif';
+      ctx.textAlign = "right";
+      ctx.textBaseline = "top";
+      for (const b of this.boxes) {
+        const y1 = this.series.priceToCoordinate(b.hi);
+        const y2 = this.series.priceToCoordinate(b.lo);
+        let x1 = ts.logicalToCoordinate(b.from);
+        let x2 = b.to == null ? W : ts.logicalToCoordinate(b.to);
+        if (y1 == null || y2 == null || x1 == null || x2 == null || x2 < 0 || x1 > W) continue;
+        x1 = Math.max(0, x1);
+        x2 = Math.min(W, x2);
+        const top = Math.min(y1, y2);
+        const h = Math.max(1, Math.abs(y2 - y1));
+        ctx.fillStyle = rgba(b.color, 0.1);
+        ctx.fillRect(x1, top, x2 - x1, h);
+        ctx.strokeStyle = rgba(b.color, 0.7);
+        ctx.lineWidth = 1;
+        ctx.strokeRect(Math.round(x1) + 0.5, Math.round(top) + 0.5, Math.round(x2 - x1), Math.round(h));
+        if (b.label && x2 - x1 > 60) {
+          ctx.fillStyle = b.color;
+          ctx.fillText(b.label, x2 - 4, top + 2);
+        }
+      }
+    });
+  }
+}
+
 /** 배경 띠 (심리 지표 단계 색 띠, 장 밖 시간). bands: [{lo, hi, color}] 가격 구간 또는 [{from, to, color}] 봉 구간 */
 export class Bands extends Base {
   constructor() {

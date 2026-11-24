@@ -282,7 +282,7 @@ check("XIRR: 1년 뒤 10% → 10%", xirr([[0, -1000], [365 * day, 1100]]), 0.1, 
       }
       if (bad.length) console.warn("[시험] 매매 방식 지표", bad);
       check(`매매 방식 지표 9개: 5분봉·일봉에서 오류 없이 그려지고 범례가 나온다${bad.length ? ` — ${bad.join(" / ")}` : ""}`, bad.length, 0);
-      check("매매 방식 지표 10개: 설명서(쓰는 봉·보는 법)가 있고 지표 창 맨 위에 나온다", [GUIDE_ORDER.length, GUIDE_ORDER.filter((id) => EXPLAIN[id]?.one && /\[/.test(EXPLAIN[id].read)).length, yes(ORDER.slice(0, 10).join() === GUIDE_ORDER.join())], [10, 10, 1]);
+      check("매매 방식 지표 11개 (0.28.0 나뇨띠 지표 포함): 설명서(쓰는 봉·보는 법)가 있고 지표 창 맨 위에 나온다", [GUIDE_ORDER.length, GUIDE_ORDER.filter((id) => EXPLAIN[id]?.one && /\[/.test(EXPLAIN[id].read)).length, yes(ORDER.slice(0, GUIDE_ORDER.length).join() === GUIDE_ORDER.join())], [11, 11, 1]);
       // 0.22.0 딱지: 신호를 내는 지표는 범례가 '롱 후보·숏 후보·쉼' 한 줄로 시작하고, 기본은 그 한 줄뿐 (자세한 글자는 설정에서)
       const SIG = ["regime", "sixma", "pull20", "setup50", "pistol", "lshape", "vwapswing", "barread"];
       const badgeOf = (id, detail) => {
@@ -318,6 +318,36 @@ check("XIRR: 1년 뒤 10% → 10%", xirr([[0, -1000], [365 * day, 1100]]), 0.1, 
       const af2 = S.autoFib(S.flipBars(fb), 120);
       check("자동 피보: 내린 움직임이면 저점에서 위로 잰다", [yes(af2.up), af2.price(0), af2.price(1)], [0, -16, -8]);
       check("자동 피보: 그 봉까지만 본다 (뒤에 더 높은 고점이 있어도 안 씀)", S.autoFib(fb, 120, 3).H, 13);
+      // 0.28.0 로그 피보 (양봉업자 강의 SOXX: 49.44 → 218.65를 로그로 나누면 0.5 = 103.97, 1.272 = 327.62, 2 = 966.99)
+      const sx = [60, 49.44 + 1, 80, 120, 218.65 - 1, 200].map((c, k) => ({ t: k * 86400, o: c, h: c + 1, l: c - 1, c }));
+      const lf = S.autoFib(sx, 120, sx.length - 1, true);
+      check("자동 피보 로그: 0.5 = 103.97 · 1.272 = 327.62 · 2 = 966.99 · 지금(200) 되돌림 0.06", [lf.price(0.5), lf.price(-0.272), lf.price(-1), lf.back(200)], [103.97, 327.62, 966.99, 0.06], 0.01);
+      const { fibPrice } = await import("../drawings/layer.js");
+      check("그리기 피보: 일반 0.5 = 134.05 · 로그 0.5 = 103.97 · 로그 1.272 확장 = 327.62 (바닥 49.44 → 꼭대기 218.65)", [fibPrice(49.44, 218.65, 0.5, false), fibPrice(49.44, 218.65, 0.5, true), fibPrice(218.65, 49.44, 1.272, true)], [134.045, 103.97, 327.62], 0.01);
+      // 0.28.0 나뇨띠 지표 (구름 상황판) — 2026-11-24 방송 캡처와 바이낸스 BTCUSDT 3분봉으로 맞춘 규칙
+      const CB = await import("../indicators/cloudboard.js");
+      const mk3 = (rows) => rows.map(([o, h, l, c], k) => ({ t: k * 180, o, h, l, c, v: 1 }));
+      // 22:03 · 22:06 · 22:09 · 22:12 · 22:15 실제 봉 (60,000을 22:09에 아래로 뚫음 → 22:12 저가 59,711.6이 6-8 칸에 닿고 59,930.9로 말려 올라옴)
+      const lb3 = mk3([[60435.5, 60557.7, 60404.0, 60538.9], [60538.8, 60538.9, 60074.4, 60182.7], [60182.8, 60324.4, 59824.4, 59888.0], [59888.1, 60014.7, 59711.6, 59930.9], [59930.8, 60063.0, 59758.8, 59976.9]]);
+      check("2·4·6·8: 22:06 = 1K 조건 대기 · 22:09 = 구간 반응 대기 · 22:12 = 6-8 반응 발생 · 22:15 = 6-8 구간 관찰 (방송 표와 같음)", [1, 2, 3, 4].map((k) => ["1K 조건 대기", "구간 반응 대기", "6-8 반응 발생", "6-8 구간 관찰"].indexOf(CB.ladderAt(lb3, k).text)), [0, 1, 2, 3]);
+      const back = mk3([[59900, 59950, 59850, 59900], [59900, 60100, 59890, 60050]]);
+      check("2·4·6·8: 천 단위 위로 돌아오면 다시 1K 조건 대기 · 뚫은 지 20봉 넘으면 1K 조건 대기", [CB.ladderAt([...lb3, ...back], 6).text === "1K 조건 대기", CB.ladderAt([...lb3, ...mk3(Array(21).fill([59900, 59950, 59850, 59900]))], 25).text === "1K 조건 대기"].map(yes), [1, 1]);
+      check("구름 이격 글자: 위 0.8 ATR · 아래 7.3 ATR · 이격 큼 · 구름 안 (이격 큼은 2 ATR부터)", [CB.gapText(0.8) === "위 0.8 ATR", CB.gapText(-7.3) === "아래 7.3 ATR · 이격 큼", CB.gapText(0) === "구름 안", CB.gapText(1.4) === "위 1.4 ATR", CB.gapText(-2.2) === "아래 2.2 ATR · 이격 큼"].map(yes), [1, 1, 1, 1, 1]);
+      // 일목 구름 (트레이딩뷰 기본 9·26·52, 26칸 앞으로): 고가 = 종가+1, 저가 = 종가−1, 종가 = 봉 번호 → 25봉 전의 가운데 값
+      const lin = Array.from({ length: 120 }, (_, k) => ({ t: k * 60, o: k, h: k + 1, l: k - 1, c: k }));
+      const ic = CB.ichimokuCloud(lin);
+      // 100번 봉: 75번 봉 기준 전환선(67~75 가운데 71) · 기준선(50~75 가운데 62.5) → A = 66.75, 선행스팬B(24~75 가운데) = 49.5
+      check("일목 구름: 100번 봉 A = 66.75 · B = 49.5 · 그 전 봉은 비어 있음(구름이 아직 없음)", [ic.a[100], ic.b[100], ic.b[75]], [66.75, 49.5, null]);
+      check("구름 위치·이격: 위 → 롱 우세 · (종가 − 구름 위 끝) ÷ ATR", [CB.trendText(CB.cloudPos(70, 66.75, 49.5)) === "롱 우세", CB.cloudGap(70, 66.75, 49.5, 2), CB.cloudGap(40, 66.75, 49.5, 2), CB.cloudGap(60, 66.75, 49.5, 2)].map((v) => (typeof v === "boolean" ? yes(v) : v)), [1, 1.625, -4.75, 0]);
+      // 2번 봉 저가 8 = 프랙탈 저점 (양옆 2봉보다 낮음), 4번 봉 고가 12 = 프랙탈 고점 → 7번 봉 종가 7.2가 저점을 깸
+      const fr = mk3([[11, 12, 10, 11], [10, 11, 9, 10], [9, 10, 8, 9], [10, 11, 9, 10], [11, 12, 10, 11], [10.5, 11.5, 9.5, 10.5], [10.6, 11.6, 9.6, 10.6], [9, 9, 7, 7.2]]);
+      check("프랙탈: 1시간봉 롱인데 프랙탈 저점을 깨면 '반대 이탈 · 재검토' · 1시간봉 숏이면 '같은 방향 돌파' · 중립이면 '조건 대기'", [CB.fractalState(fr, 7, 1).text, CB.fractalState(fr, 7, -1).text, CB.fractalState(fr, 7, 0).text].map((t, k) => (t === ["반대 이탈 · 재검토", "같은 방향 돌파", "조건 대기"][k] ? 1 : 0)), [1, 1, 1]);
+      check("관찰 기준: 셋 다 숏 = 일치 · 엇갈림 = 미일치 · 큰 시간봉 못 봄 = 데이터 대기", [CB.alignText("below", "below", "below") === "큰 방향 일치 · 숏", CB.alignText("below", "inside", "below") === "큰 방향 미일치", CB.alignText("below", null, "below") === "큰 방향 데이터 대기"].map(yes), [1, 1, 1]);
+      check("비트코인 달러만 2·4·6·8: bn:BTCUSDT · ok:BTC-USDT-SWAP 예 · bn:ETHUSDT · KRW-BTC 아니오", ["bn:BTCUSDT", "ok:BTC-USDT-SWAP", "bn:ETHUSDT", "KRW-BTC"].map((id) => yes(CB.isBtcUsd(id))), [1, 1, 0, 0]);
+      const nhd = IND.nanyotti.make(mkCtx("5m"), wd({ id: "nanyotti" }));
+      nhd.render(rw, 0);
+      const pn = nhd.panel(rw.length - 1);
+      check("나뇨띠 지표: 표 9줄이 방송과 같은 순서 (현재 추세 … 가까운 영역) + 한 줄 요약", [pn?.rows.map((r) => r.label).join("|") === "현재 추세|큰 시간봉|프랙탈|구름 이격|2·4·6·8|시장 활동|관찰 기준|매물영역|가까운 영역", !!pn?.summary].map(yes), [1, 1]);
     }
   }
   // 오프닝 레인지: 9:30~9:45(15분) 고가·저가는 9:45 봉부터, 다음 날은 다시
@@ -919,7 +949,7 @@ section("OKX 무기한선물 (0.25.0)");
 // ── 모든 화면 파일이 문법 오류 없이 읽히는지 (하나라도 깨지면 EXE가 검은 화면에서 멈춘다) ──
 section("파일 읽기 (문법 오류 없는지)");
 {
-  const MODULES = ["alerts/engine", "backtest/engine", "backtest/view", "config", "core/bars", "core/colors", "core/csv", "core/events", "core/daily", "core/data", "core/db", "core/estimate", "core/intraday", "core/limit", "core/series", "core/session", "core/stocklist", "core/symbols", "core/tz", "drawings/geom", "drawings/layer", "drawings/store", "indicators/calc", "indicators/explain", "indicators/guides", "indicators/index", "indicators/setups", "indicators/sentiment", "indicators/triangle", "platform", "sources/alpaca", "sources/binance", "sources/hyperliquid", "sources/okx", "sources/reconnect", "sources/sentiment", "sources/status", "sources/toss", "sources/yahoo", "trade/engine", "trade/history", "trade/journal", "trade/orderlines", "trade/panel", "ui/alerts", "ui/cell", "ui/dialog", "ui/dom", "ui/drawbar", "ui/format", "ui/goto", "ui/grid", "ui/indpanel", "ui/measure", "ui/menu", "ui/picker", "ui/primitives", "ui/replay", "ui/search", "ui/settings", "ui/sidebar", "ui/snapshot", "ui/statusbar", "ui/tip", "ui/toolbar", "ui/update", "ui/welcome"];
+  const MODULES = ["alerts/engine", "backtest/engine", "backtest/view", "config", "core/bars", "core/colors", "core/csv", "core/events", "core/daily", "core/data", "core/db", "core/estimate", "core/intraday", "core/limit", "core/series", "core/session", "core/stocklist", "core/symbols", "core/tz", "drawings/geom", "drawings/layer", "drawings/store", "indicators/calc", "indicators/cloudboard", "indicators/explain", "indicators/guides", "indicators/index", "indicators/setups", "indicators/sentiment", "indicators/triangle", "platform", "sources/alpaca", "sources/binance", "sources/hyperliquid", "sources/okx", "sources/reconnect", "sources/sentiment", "sources/status", "sources/toss", "sources/yahoo", "trade/engine", "trade/history", "trade/journal", "trade/orderlines", "trade/panel", "ui/alerts", "ui/cell", "ui/dialog", "ui/dom", "ui/drawbar", "ui/format", "ui/goto", "ui/grid", "ui/indpanel", "ui/measure", "ui/menu", "ui/picker", "ui/primitives", "ui/replay", "ui/search", "ui/settings", "ui/sidebar", "ui/snapshot", "ui/statusbar", "ui/tip", "ui/toolbar", "ui/update", "ui/welcome"];
   const broken = [];
   for (const m of MODULES) {
     try {

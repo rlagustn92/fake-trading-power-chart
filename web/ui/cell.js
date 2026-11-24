@@ -40,11 +40,20 @@ export function createCell(env, cc) {
   const priceEl = h("span.ch-price");
   const chgEl = h("span.ch-chg");
   const tfEl = h("span.ch-tf");
+  // 눈금 딱지 (0.28.0, 사용자: "로그인지 일반인지 어디 표시가 없네 · 초보라 구분 안 감"): 누르면 로그 ↔ 일반 (Alt+L과 같다)
+  const scaleEl = h("button.ch-scale", {
+    onclick: (e) => {
+      e.stopPropagation();
+      api.setView({ scale: scaleMode() === "log" ? "normal" : "log" });
+    },
+  });
   const badgeEl = h("span.ch-badge");
   const bellEl = h("span.ch-bell", { "data-tip-text": "이 종목에 켜 둔 알림이 있어요 (🔔 목록에서 보기)" });
   const closeEl = h("button.ch-close", { onclick: (e) => (e.stopPropagation(), env.onClearCell?.(api)), "data-tip-text": "이 칸 차트 지우기 (빈 칸으로)" }, "✕");
-  const head = h("div.cell-head", nameEl, subEl, priceEl, chgEl, tfEl, badgeEl, bellEl, closeEl);
+  const head = h("div.cell-head", nameEl, subEl, priceEl, chgEl, tfEl, scaleEl, badgeEl, bellEl, closeEl);
   const legend = h("div.legend");
+  // 지표 표 (0.28.0 나뇨띠 지표): handle.panel(i)가 주는 표를 차트 오른쪽 위에. 제목을 누르면 접힘 (칸마다 기억, cc.panel_fold)
+  const panelEl = h("div.ind-panel", { hidden: true });
   const msg = h("div.cell-msg", { hidden: true });
   // 빈 칸: 종목을 고르면 채워진다 (분할 화면을 내 마음대로 꾸밀 때)
   const emptyEl = h(
@@ -54,7 +63,7 @@ export function createCell(env, cc) {
     h("p.hint", "또는 이 칸을 누른 뒤 관심종목에서 종목을 누르세요")
   );
   const nowBtn = h("button.cell-now", { hidden: true, onclick: (e) => (e.stopPropagation(), load("fresh")), "data-tip-text": "과거 한 구간만 보고 있어요\n누르면 지금(최신)으로 돌아가요" }, "⏩ 지금으로");
-  const body = h("div.cell-body", legend, msg, emptyEl, nowBtn);
+  const body = h("div.cell-body", legend, panelEl, msg, emptyEl, nowBtn);
   const root = h("div.cell", head, body);
 
   // ── 상태 ──
@@ -864,7 +873,10 @@ export function createCell(env, cc) {
 
   // ── 범례·머리줄 ──
   function paintLegend() {
-    if (!cc.symbol) return legend.replaceChildren();
+    if (!cc.symbol) {
+      panelEl.hidden = true;
+      return legend.replaceChildren();
+    }
     const i = crossIdx ?? bars.length - 1;
     const b = bars[i];
     const rows = [];
@@ -957,6 +969,50 @@ export function createCell(env, cc) {
       rows.push(row);
     }
     legend.replaceChildren(...rows);
+    paintPanel(i);
+  }
+
+  /** 오른쪽 위 지표 표 (0.28.0): 첫 번째로 표를 주는 지표 하나만. 마우스로 옛 봉을 가리키면 그때의 표 */
+  function paintPanel(i) {
+    let pn = null;
+    for (const hd of handles) {
+      if (!hd.panel) continue;
+      try {
+        pn = hd.panel(i);
+      } catch {
+        pn = null;
+      }
+      if (pn) break;
+    }
+    if (!pn) {
+      panelEl.hidden = true;
+      return panelEl.replaceChildren();
+    }
+    panelEl.hidden = false;
+    let w = 60;
+    try {
+      w = chart.priceScale("right").width() || 60;
+    } catch {}
+    panelEl.style.right = `${w + 8}px`;
+    const fold = !!cc.panel_fold;
+    const head = h(
+      "div.ip-head",
+      {
+        onclick: (e) => {
+          e.stopPropagation();
+          cc.panel_fold = !fold;
+          env.onChange?.();
+          paintLegend();
+        },
+        "data-tip-text": fold ? "표 펼치기" : "표 접기 (한 줄만 남겨요)",
+      },
+      h("b", pn.title),
+      h("span.ip-sub", pn.sub ? ` · ${pn.sub}` : ""),
+      h("span.ip-fold", fold ? "  ▸ 접힘" : "  ▾")
+    );
+    if (fold) return panelEl.replaceChildren(head);
+    const rows = pn.rows.map((r) => h("div.ip-row", { "data-tip-text": r.tip ?? "" }, h("span.ip-l", r.label), h(`span.ip-v${r.bold ? ".b" : ""}`, { style: `color:${r.color ?? "#e8eaed"}` }, r.value)));
+    panelEl.replaceChildren(head, pn.summary ? h("div.ip-sum", { "data-tip-text": "표 9줄을 합친 한 줄 요약이에요\n사라·팔아라가 아니라 지금 상황이에요" }, pn.summary) : null, ...rows, pn.foot ? h("div.ip-foot", pn.foot) : null);
   }
 
   /** 장이 닫힌 시간: 무기한선물로 본 24시간 추정가를 주황 점선으로 (SPEC §2.6) */
@@ -977,12 +1033,23 @@ export function createCell(env, cc) {
   function paintHead() {
     if (!cc.symbol) {
       setText(nameEl, "빈 칸");
-      for (const el of [subEl, priceEl, chgEl, tfEl, badgeEl, bellEl]) setText(el, "");
+      for (const el of [subEl, priceEl, chgEl, tfEl, scaleEl, badgeEl, bellEl]) setText(el, "");
+      scaleEl.hidden = true;
       return;
     }
     setText(nameEl, info.label);
     setText(subEl, info.sub);
     setText(tfEl, TF_NAME[tf]);
+    const sm = scaleMode();
+    scaleEl.hidden = false;
+    setText(scaleEl, sm === "log" ? "로그" : sm === "pct" ? "%" : "일반");
+    scaleEl.className = `ch-scale ${sm}`;
+    scaleEl.dataset.tipText =
+      sm === "log"
+        ? "지금 눈금: 로그\n같은 %만큼 오르면 같은 높이로 보여요 (10→20과 100→200이 같은 높이)\n몇 년짜리 큰 차트에 좋아요\n누르면 일반 눈금으로 (Alt+L)"
+        : sm === "pct"
+          ? "지금 눈금: % (비교 종목이 있어서 보이는 첫 봉 = 0%)\n누르면 로그 눈금으로 (Alt+L)"
+          : "지금 눈금: 일반\n같은 금액만큼 오르면 같은 높이로 보여요 (10→20과 100→110이 같은 높이)\n하루 이틀 단타 차트는 이걸로 충분해요\n누르면 로그 눈금으로 (Alt+L)";
     const q = replay ? null : data.quote(info.id); // 리플레이 중에는 그때 봉 값으로
     const last = bars[bars.length - 1];
     const price = q?.price ?? last?.c;
@@ -1710,7 +1777,13 @@ export function createCell(env, cc) {
     setView(patch) {
       Object.assign(cc, patch);
       env.onChange?.();
-      if ("scale" in patch) applyScale();
+      if ("scale" in patch) {
+        applyScale();
+        // 0.28.0: 로그 눈금에 따라 값이 달라지는 지표(자동 피보·자동 삼각수렴)는 바로 다시 계산
+        for (const hd of handles) if (hd.scaleAware) try { hd.render(bars, 0); } catch {}
+        paintLegend();
+        paintHead();
+      }
       if ("basis" in patch || "chart_type" in patch) load("keep", { keepReplay: true });
     },
     reload: () => load("keep", { keepReplay: true }),
