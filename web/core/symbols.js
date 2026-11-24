@@ -145,7 +145,7 @@ export function describe(id) {
     volume: true,
     line: false, // 선 차트로만 (심리 지표)
     currency: "USD",
-    tfs: ["1m", "5m", "15m", "30m", "1h", "4h", "1D", "1W", "1M", "1Y"],
+    tfs: ["1m", "3m", "5m", "15m", "30m", "1h", "4h", "1D", "1W", "1M", "1Y"],
     yieldLike: false,
     splits: true, // 분할·배당이 있을 수 있음
   };

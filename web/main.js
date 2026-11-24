@@ -7,7 +7,7 @@ import { reconnectAll } from "./sources/reconnect.js";
 import { getStockList, marketOf } from "./core/stocklist.js";
 import { createData, TF_NAME } from "./core/data.js";
 import { createEstimator } from "./core/estimate.js";
-import { TIMEFRAMES, TF_SEC, isDailyTf, isLongTf } from "./core/bars.js";
+import { TIMEFRAMES, ALT_TFS, TF_SEC, isDailyTf, isLongTf } from "./core/bars.js";
 import { createGrid } from "./ui/grid.js";
 import { createToolbar } from "./ui/toolbar.js";
 import { createSidebar } from "./ui/sidebar.js";
@@ -113,7 +113,7 @@ async function prefetchTfs(cell, t) {
   if (!info?.tfs || isDailyTf(cell.tf)) return;
   const need = [];
   const seen = new Set([baseTf(info, cell.tf) ?? cell.tf]);
-  for (const tf of ["5m", "15m", "30m", "1h", "4h"]) {
+  for (const tf of ["3m", "5m", "15m", "30m", "1h", "4h"]) {
     const base = baseTf(info, tf) ?? tf;
     if (!info.tfs.includes(tf) || seen.has(base)) continue; // 15분·4시간이 5분·1시간으로 만들어지는 종목은 한 번만
     seen.add(base);
@@ -725,7 +725,7 @@ addEventListener("keydown", (e) => {
     // Alt+1~8 = 1분~주봉, Alt+9 = 월봉, Alt+0 = 년봉 (0.25.0)
     if (e.altKey && !ctrl && /^[0-9]$/.test(e.key) && mode === "chart") {
       e.preventDefault();
-      return grid.setTimeframe(TIMEFRAMES[e.key === "0" ? 9 : +e.key - 1]);
+      return grid.setTimeframe(ALT_TFS[e.key === "0" ? 9 : +e.key - 1]);
     }
     if (e.altKey && !ctrl && k === "m" && mode === "chart") {
       e.preventDefault();

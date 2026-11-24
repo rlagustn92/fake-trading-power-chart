@@ -826,7 +826,7 @@ export function createCell(env, cc) {
       if (daily()) {
         setRange(cc.range ?? "all");
       } else {
-        const show = { "1m": 180, "5m": 160, "15m": 140, "30m": 140, "1h": 140, "4h": 140 }[tf] ?? 150;
+        const show = { "1m": 180, "3m": 170, "5m": 160, "15m": 140, "30m": 140, "1h": 140, "4h": 140 }[tf] ?? 150;
         ts.setVisibleLogicalRange({ from: n - show, to: n + 5 });
       }
     });

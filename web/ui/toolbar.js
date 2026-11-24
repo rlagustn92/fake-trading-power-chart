@@ -1,6 +1,6 @@
 // 툴바 (SPEC §3.1, §0.2 짧게): [차트][백테스트] │ 종목 ▾ │ 봉 7개 │ 💰 모의매매 │ 지표 │ ✏️ │ 📏 │ ▦ 분할 │ ⇄ │ 보기 ▾ │ 🔔 │ ⛶ ⚙
 import { h } from "./dom.js";
-import { TIMEFRAMES, isDailyTf } from "../core/bars.js";
+import { TIMEFRAMES, ALT_TFS, isDailyTf } from "../core/bars.js";
 import { TF_NAME } from "../core/data.js";
 import { openMenu } from "./menu.js";
 import { SPLIT_ORDER, SPLIT_NAME } from "./grid.js";
@@ -19,7 +19,11 @@ export function createToolbar(root, app) {
   const symName = h("span.tb-sym-name");
   const symSub = h("span.tb-sym-sub");
   const symBtn = h("button.tb-sym", { onclick: () => app.openPicker(), "data-tip-text": "종목 바꾸기\n차트 위에서 그냥 글자를 쳐도 돼요 (예: SOXL, 삼성)" }, symName, symSub, h("span.tb-caret", "▾"));
-  const tfBtns = TIMEFRAMES.map((tf, i) => h("button.tf", { onclick: () => app.grid.setTimeframe(tf), "data-tip-text": `${TF_NAME[tf]}봉 (Alt+${i === 9 ? 0 : i + 1})${tf === "1M" || tf === "1Y" ? "\n일봉을 묶어서 만들어요" : ""}` }, TF_NAME[tf]));
+  const altOf = (tf) => {
+    const i = ALT_TFS.indexOf(tf);
+    return i < 0 ? "" : ` (Alt+${i === 9 ? 0 : i + 1})`;
+  };
+  const tfBtns = TIMEFRAMES.map((tf) => h("button.tf", { onclick: () => app.grid.setTimeframe(tf), "data-tip-text": `${TF_NAME[tf]}봉${altOf(tf)}${tf === "1M" || tf === "1Y" ? "\n일봉을 묶어서 만들어요" : ""}${tf === "3m" ? "\n코인(바이낸스·OKX·하이퍼리퀴드)은 거래소 3분봉, 주식은 1분봉 3개를 묶어요" : ""}` }, TF_NAME[tf]));
   const tradeBtn = h("button.tb-trade", { onclick: () => app.toggleTrade(), "data-tip-text": "💰 모의매매 창 열기·닫기\n과거 차트를 리플레이하며 가상 돈으로 롱·숏 연습 (진짜 주문 없음)" }, lbl("💰 모의매매", "💰"));
   const indBtn = h("button", { onclick: () => app.openIndicators(), "data-tip-text": "지표 넣기·빼기 (Ctrl+I)\nSMA·볼린저 밴드·VWMA·RSI·MACD…" }, lbl("지표 ＋", "지표＋"));
   const indClear = h("button", { onclick: () => clearMenu(), "data-tip-text": "지표 모두 지우기\n분할 화면이면 '이 칸만' 또는 '보이는 칸 모두'를 고르세요\n잘못 눌렀으면 오른쪽 아래 '되돌리기'" }, lbl("지표 지우기", "🧹"));

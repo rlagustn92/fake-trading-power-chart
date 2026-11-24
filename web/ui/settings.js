@@ -9,7 +9,7 @@ import { ymd } from "../core/tz.js";
 import { num } from "./format.js";
 import { confirmBox, toast } from "./dialog.js";
 
-const TF_ORDER = ["1D", "1W", "1h", "4h", "30m", "15m", "5m", "1m"];
+const TF_ORDER = ["1D", "1W", "1h", "4h", "30m", "15m", "5m", "3m", "1m"];
 
 /** Alpaca 키 저장 실패 이유를 알아듣기 쉽게 */
 function alpacaHint(err) {

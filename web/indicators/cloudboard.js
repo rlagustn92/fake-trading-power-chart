@@ -89,46 +89,69 @@ export const xText = (v) => (v == null ? "—" : `${v.toFixed(1)}x`);
 export const isBtcUsd = (id) => /BTC/i.test(id ?? "") && !/KRW|EUR|JPY|GBP/i.test(id ?? "");
 
 /**
- * 5번 줄 2·4·6·8 (추정, 비트코인 3분봉 전용): 종가가 천 단위(60,000 등)를 아래로 뚫으면 그 천 단위 아래 200달러 칸을 본다
- *   8-1K = 59,800~60,000 · 6-8 = 59,600~59,800 · 4-6 · 2-4 · 0-2 (백 단위 숫자 그대로)
- * 종가가 그 천 단위 위로 돌아오거나, 뚫은 지 LADDER_LIFE봉이 지나면 다시 "1K 조건 대기". 봉의 저가가 닿은 칸으로 말한다.
- *   더 깊은 칸에 새로 닿고 종가가 그 칸 위로 말려 올라오면 "반응 발생", 그 뒤는 "구간 관찰", 맨 위 칸(8-1K)은 "구간 반응 대기".
- * 2026-11-24 방송 10장(12:13 · 18:54 · 22:06~22:19 등)과 맞춘 규칙. 뚫은 뒤 몇 봉까지 보는지는 화면으로 못 정해서 20봉(1시간)으로 정했다
- * (오전 11시에 61,000을 뚫은 뒤 15:23 화면은 "1K 조건 대기"였다). 위로 뚫을 때는 화면에서 못 봐서 넣지 않았다.
+ * 5번 줄 2·4·6·8 (추정, 비트코인 3분봉 전용): 종가가 천 단위(60,000 등)를 뚫으면 그 천 단위 옆 200달러 칸을 본다 (백 단위 숫자 그대로)
+ *   아래로 뚫으면 59,800~60,000(8-1K, 바로 붙은 칸) · 59,600~59,800(6-8) · …, 위로 뚫으면 60,000~60,200(0-2, 붙은 칸) · 60,200~60,400(2-4) · …
+ * 종가가 뚫은 천 단위 반대편으로 돌아오거나, 뚫은 지 LADDER_LIFE봉이 지나면 다시 "1K 조건 대기". 봉의 저가가 있는 칸으로 말한다.
+ * 2026-11-24 방송 13장(12:13 · 18:54 · 22:06~22:19 · 23:06 · 23:21 등)과 모두 맞춘 규칙. 뚫은 뒤 보는 시간(20봉 = 1시간)과
+ * 관찰 봉 수(3)는 화면으로 범위만 좁혀서 정한 값 (오전 11시에 61,000을 뚫은 뒤 15:23 화면은 "1K 조건 대기"였다).
  * → {text, T(지금 보는 천 단위 또는 null), band(칸 아래 끝 숫자 0·2·4·6·8)}
  */
 export const LADDER_LIFE = 20;
-export function ladderAt(bars, k, look = 400, life = LADDER_LIFE) {
+export const LADDER_OBS = 3; // 반응 뒤 이만큼의 봉까지 "구간 관찰", 그 뒤는 "구간 반응 대기" (23:03 반응 → 23:18 봉 "구간 반응 대기"에 맞춤)
+/*
+ * 0.29.0: 위로 뚫을 때도 (23:00 봉이 60,000을 위로 뚫음 → 23:03 봉 저가 60,232.7이 60,200~60,400 칸에 닿고 칸 위에서 마감 = "2-4 반응 발생",
+ * 23:18 봉 = "구간 반응 대기"). 아래로 뚫으면 천 단위 아래 칸(8-1K가 바로 붙은 칸), 위로 뚫으면 위 칸(0-2가 붙은 칸), 둘 다 봉의 저가로 칸을 잰다.
+ * 반응 = 뚫은 뒤 바로 붙은 칸이 아닌 칸에 처음 닿고 종가가 그 칸 아래 끝 위. 반응 뒤 LADDER_OBS봉은 "구간 관찰", 그 밖에는 "구간 반응 대기".
+ */
+export function ladderAt(bars, k, look = 400, life = LADDER_LIFE, obs = LADDER_OBS) {
   let T = null;
+  let dir = 0; // −1 아래로 뚫음 · 1 위로 뚫음
   let since = -1;
-  let band = null;
-  let prev = null;
-  let react = false;
-  const bandOf = (low) => Math.max(0, Math.min(8, Math.floor((low - (T - 1000)) / 200) * 2));
+  let reacted = new Set();
+  let lastR = -1;
+  let rBand = null;
+  let cur = null; // k번 봉 저가가 있는 칸 (붙은 칸이면 null) — "구간 관찰"은 지금 칸 이름으로 (12:09 봉: 4-6에서 반응 뒤 6-8 칸 → "6-8 구간 관찰")
   for (let i = Math.max(1, k - look); i <= k; i++) {
+    cur = null;
     const c = bars[i].c;
     const t0 = Math.floor(bars[i - 1].c / 1000) * 1000; // 앞 봉 종가가 있던 천 단위
+    const fresh = () => {
+      since = i;
+      reacted = new Set();
+      lastR = -1;
+    };
     if (c < t0) {
       T = Math.floor(c / 1000) * 1000 + 1000; // 천 단위를 아래로 뚫은 봉 → 그 천 단위부터 다시
-      since = i;
-      prev = null;
-    } else if (T != null && (c >= T || i - since > life)) {
-      T = null; // 그 천 단위 위로 돌아왔거나 오래됨 → 처음부터
-      prev = null;
+      dir = -1;
+      fresh();
+    } else if (c >= t0 + 1000) {
+      T = Math.floor(c / 1000) * 1000; // 천 단위를 위로 뚫은 봉
+      dir = 1;
+      fresh();
+    } else if (T != null && ((dir < 0 ? c >= T : c < T) || i - since > life)) {
+      T = null; // 뚫은 천 단위 반대편으로 돌아왔거나 오래됨 → 처음부터
+      dir = 0;
     }
-    if (T == null) {
-      band = null;
-      react = false;
-      continue;
+    if (T == null) continue;
+    const low = bars[i].l;
+    const base = dir < 0 ? T - 1000 : T; // 칸을 세는 천 단위 바닥
+    if (low < base || low >= base + 1000) continue; // 천 단위 밖으로 꼬리만 나감
+    const band = Math.max(0, Math.min(8, Math.floor((low - base) / 200) * 2));
+    const adj = dir < 0 ? band === 8 : band === 0; // 뚫은 천 단위에 바로 붙은 칸
+    if (!adj) cur = band;
+    if (!adj && !reacted.has(band) && c >= base + band * 100) {
+      reacted.add(band);
+      lastR = i;
+      rBand = band;
     }
-    band = bandOf(bars[i].l);
-    const top = T - 1000 + (band + 2) * 100; // 그 칸의 위 끝 (6-8 칸이면 x,800)
-    react = band < 8 && (prev == null || band < prev) && c >= top;
-    prev = band;
   }
   if (T == null) return { text: "1K 조건 대기", T: null, band: null };
-  if (band >= 8) return { text: "구간 반응 대기", T, band };
-  return { text: `${band}-${band + 2} ${react ? "반응 발생" : "구간 관찰"}`, T, band };
+  if (lastR === k) return { text: `${rBand}-${rBand + 2} 반응 발생`, T, band: rBand };
+  if (lastR >= 0 && k - lastR <= obs) {
+    const b = cur ?? rBand;
+    return { text: `${b}-${b + 2} 구간 관찰`, T, band: b };
+  }
+  return { text: "구간 반응 대기", T, band: null };
 }
 
 /**

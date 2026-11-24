@@ -15,8 +15,8 @@ import { logInfo } from "../platform.js";
 
 /** 화면 봉 → 저장 봉 */
 export const BASE_TF = {
-  alpaca: { "1m": "1m", "5m": "5m", "15m": "5m", "30m": "5m", "1h": "5m", "4h": "5m" },
-  yahoo: { "1m": "1m", "5m": "5m", "15m": "5m", "30m": "5m", "1h": "1h", "4h": "1h" }, // 30분봉 = 5분봉 6개 (따로 받지 않는다)
+  alpaca: { "1m": "1m", "3m": "1m", "5m": "5m", "15m": "5m", "30m": "5m", "1h": "5m", "4h": "5m" },
+  yahoo: { "1m": "1m", "3m": "1m", "5m": "5m", "15m": "5m", "30m": "5m", "1h": "1h", "4h": "1h" }, // 30분봉 = 5분봉 6개, 3분봉 = 1분봉 3개 (따로 받지 않는다)
 };
 
 export function baseTf(info, tf) {

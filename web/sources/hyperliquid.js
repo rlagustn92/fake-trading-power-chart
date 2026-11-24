@@ -9,7 +9,7 @@ import { setSourceStatus } from "./status.js";
 
 const INFO = "https://api.hyperliquid.xyz/info";
 const WS = "wss://api.hyperliquid.xyz/ws";
-export const TF = { "1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m", "1h": "1h", "4h": "4h", "1D": "1d", "1W": "1w" };
+export const TF = { "1m": "1m", "3m": "3m", "5m": "5m", "15m": "15m", "30m": "30m", "1h": "1h", "4h": "4h", "1D": "1d", "1W": "1w" };
 const queue = createLimiter(1, 300);
 
 const toRow = (r) => ({ t: r.t / 1000, o: +r.o, h: +r.h, l: +r.l, c: +r.c, v: +r.v });

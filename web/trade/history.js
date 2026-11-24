@@ -11,7 +11,7 @@ import { TF_SEC } from "../core/bars.js";
 import { DAY } from "../core/tz.js";
 import { logInfo } from "../platform.js";
 
-export const BACKFILL_TFS = ["1m", "5m", "15m", "30m", "1h", "4h"];
+export const BACKFILL_TFS = ["1m", "3m", "5m", "15m", "30m", "1h", "4h"]; // 3m: 0.29.0
 const PAGE = 1500;
 const PAUSE_MS = 350;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -222,7 +222,7 @@ async function spanPlan(info, plan, { onProgress = () => {}, stop = () => false 
 export const CHART_TFS = ["5m", "15m", "30m", "1h", "4h"];
 export const YEAR = 365 * DAY;
 export const CHART_STEP = 2; // 한 번에 받는 해
-const TF_KO = { "1m": "1분봉", "5m": "5분봉", "15m": "15분봉", "30m": "30분봉", "1h": "1시간봉", "4h": "4시간봉" };
+const TF_KO = { "1m": "1분봉", "3m": "3분봉", "5m": "5분봉", "15m": "15분봉", "30m": "30분봉", "1h": "1시간봉", "4h": "4시간봉" };
 
 /** 지금 first(가장 옛 봉)까지 있으면 다음에 받을 곳 = 지금부터 2·4·6…년 전 중 first보다 앞인 첫 곳 (거의 다 찬 2년은 다 찬 것으로) */
 export function nextYears(first, now, step = CHART_STEP) {

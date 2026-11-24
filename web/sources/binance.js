@@ -7,7 +7,7 @@ import { setSourceStatus } from "./status.js";
 
 const REST = "https://fapi.binance.com";
 const WS = "wss://fstream.binance.com/market/stream";
-export const TF = { "1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m", "1h": "1h", "4h": "4h", "1D": "1d", "1W": "1w" };
+export const TF = { "1m": "1m", "3m": "3m", "5m": "5m", "15m": "15m", "30m": "30m", "1h": "1h", "4h": "4h", "1D": "1d", "1W": "1w" };
 const DAY_MS = 86400e3;
 const queue = createLimiter(2, 200);
 
