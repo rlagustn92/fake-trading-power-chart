@@ -11,7 +11,8 @@ import { TF_NAME } from "../core/data.js";
 import { INDICATORS, withDefaults } from "../indicators/index.js";
 import { SENTIMENT, stageOf, sentimentTip } from "../indicators/sentiment.js";
 import { sma } from "../indicators/calc.js";
-import { Bands, AxisTag } from "./primitives.js";
+import { Bands, AxisTag, HoleMarks } from "./primitives.js";
+import { findHoles, holeSpan } from "../core/holes.js";
 import { createMeasure } from "./measure.js";
 import { createDrawings } from "../drawings/layer.js";
 import { createMapper } from "../drawings/geom.js";
@@ -49,9 +50,17 @@ export function createCell(env, cc) {
     },
   });
   const badgeEl = h("span.ch-badge");
+  // 선물 빈 곳 딱지 (0.31.0): 메우는 중 · 다 메움 · 못 메움(누르면 다시 받기)
+  const holeEl = h("button.ch-hole", {
+    hidden: true,
+    onclick: (e) => {
+      e.stopPropagation();
+      if (holeEl.classList.contains("warn")) repairHoles();
+    },
+  });
   const bellEl = h("span.ch-bell", { "data-tip-text": "이 종목에 켜 둔 알림이 있어요 (🔔 목록에서 보기)" });
   const closeEl = h("button.ch-close", { onclick: (e) => (e.stopPropagation(), env.onClearCell?.(api)), "data-tip-text": "이 칸 차트 지우기 (빈 칸으로)" }, "✕");
-  const head = h("div.cell-head", nameEl, subEl, priceEl, chgEl, tfEl, scaleEl, badgeEl, bellEl, closeEl);
+  const head = h("div.cell-head", nameEl, subEl, priceEl, chgEl, tfEl, scaleEl, badgeEl, holeEl, bellEl, closeEl);
   const legend = h("div.legend");
   // 지표 표 (0.28.0 나뇨띠 지표): handle.panel(i)가 주는 표를 차트 오른쪽 위에. 제목을 누르면 접힘 (칸마다 기억, cc.panel_fold)
   const panelEl = h("div.ind-panel", { hidden: true });
@@ -90,6 +99,12 @@ export function createCell(env, cc) {
   const markerSets = new Map();
   let extraMarkers = null; // {sym, days}
   let gaps = null; // 데이터 빈 날 (일봉)
+  // 선물 빈 곳 (0.31.0): 화면 봉 사이가 한 칸보다 벌어진 곳 [[앞 봉 t, 뒤 봉 t]] (거래소에도 없는 곳은 뺌)
+  let holes = [];
+  let holeSig = "";
+  let ensuring = false; // 칸을 열 때의 이어 받기(빈 곳 메우기 포함)가 진행 중
+  let refilling = false; // 메운 봉을 다시 읽는 중
+  let holeTimer = 0;
   // ▶ 리플레이 중이면 {full: 전체 봉, endT: 보이는 시각, m1: 그 뒤 1분봉(있으면 1분씩 흘러간다), m1More, newer: 저장소에 full 뒤가 더 있음}
   let replay = null;
   let resumeT = null; // 리플레이 중에 봉을 바꿨다 → 새 봉을 다 읽으면 이 시각부터 이어 간다
@@ -143,11 +158,13 @@ export function createCell(env, cc) {
   let estLine = null; // 24시간 추정가 점선
   let krw = null; // 국내 종목 선물의 원화 딱지 (0.30.0, syncKrw) {krx, tag, line, days, fxDays, at, loading, fx}
   const bands = new Bands(); // 세션 구분선·장 밖 시간 배경
+  const holeMarks = new HoleMarks(); // 선물 빈 곳 띠 (0.31.0)
 
   function createMain() {
     dropKrw(); // 원화 딱지 시리즈는 늘 주 시리즈 뒤에 다시 만든다 (syncKrw 설명)
     if (main) {
       main.detachPrimitive(bands);
+      main.detachPrimitive(holeMarks);
       main.detachPrimitive(drawings.prim);
       chart.removeSeries(main);
     }
@@ -161,6 +178,7 @@ export function createCell(env, cc) {
       main = chart.addSeries(LC.CandlestickSeries, { upColor: UP, downColor: DOWN, borderUpColor: UP, borderDownColor: DOWN, wickUpColor: UP, wickDownColor: DOWN });
     }
     main.attachPrimitive(bands);
+    main.attachPrimitive(holeMarks);
     main.attachPrimitive(drawings.prim);
     markersApi = LC.createSeriesMarkers(main, []);
     estLine = null;
@@ -770,6 +788,95 @@ export function createCell(env, cc) {
   };
 
   /** view: "fresh"(기본 범위) | "keep"(보던 자리) | "follow"(새 봉: 보던 자리 그대로 따라가기) | {shift:n} */
+  /** 선물: 화면 봉에서 빈 곳 찾기 → 띠·딱지 (24시간 시장이라 봉 사이가 벌어지면 빠진 것) */
+  function scanHoles() {
+    const sec = TF_SEC[tf];
+    if (info?.kind !== "perp" || !sec || isLongTf(tf) || !bars.length) holes = [];
+    else {
+      const empty = data.exchangeEmpty?.(info.id, tf) ?? new Set();
+      holes = findHoles(bars, sec).filter(([a]) => !empty.has(a));
+    }
+    paintHoles();
+  }
+
+  /** 빈 곳 띠와 칸 머리 딱지 다시 그리기 */
+  function paintHoles() {
+    const sec = TF_SEC[tf];
+    const sig = `${bars[0]?.t}|${bars.length}|${holes.map((x) => x.join("-")).join(",")}`; // 봉 번호가 밀리면 띠도 다시
+    if (sig !== holeSig) {
+      const had = holeSig.split("|")[2] ?? "";
+      holeSig = sig;
+      const idx = (t) => lowerBound(bars, (b) => b.t, t);
+      holeMarks.setData(holes.map((x) => ({ from: idx(x[0]), to: idx(x[1]), label: `빈 곳 ${holeSpan(x, sec)}` })));
+      if (had !== (holeSig.split("|")[2] ?? "")) env.onHoles?.(api); // 💰 주문 창 경고
+    }
+    clearTimeout(holeTimer);
+    const st = info?.kind === "perp" ? data.holeState?.(info.id, tf) : null;
+    let text = "";
+    let cls = "";
+    let tip = "";
+    if (st?.state === "filling") {
+      text = `⏳ 빈 곳 메우는 중 · ${st.missing}봉`;
+      tip = "이 차트에 빠진 봉이 있어서 거래소에서 그 사이만 다시 받고 있어요\n다 받기 전에는 이평선·지표가 틀릴 수 있어요";
+    } else if (holes.length && (ensuring || refilling)) {
+      text = "⏳ 빈 곳 확인 중";
+      tip = "빠진 봉이 있는지 거래소에 확인하고 있어요";
+    } else if (holes.length) {
+      text = `⚠ 빈 곳 ${holes.length}군데 · 다시 받기`;
+      cls = "warn";
+      tip = "이 차트에 빠진 봉이 있어요 (노란 띠)\n이평선·지표가 틀릴 수 있어요\n누르면 거래소에서 다시 받아요";
+    } else if (st?.state === "done" && st.added && Date.now() - st.at < 4000) {
+      text = "✓ 빈 곳 다 메웠어요";
+      cls = "ok";
+      holeTimer = setTimeout(paintHoles, 4000 - (Date.now() - st.at));
+    }
+    holeEl.hidden = !text;
+    setText(holeEl, text);
+    holeEl.className = `ch-hole${cls ? ` ${cls}` : ""}`;
+    holeEl.dataset.tipText = tip;
+  }
+
+  /** 빈 곳 다시 받기 (딱지·오른쪽 클릭 메뉴). recheck = 거래소에 없다고 적어 둔 곳도 다시 물어봄 */
+  async function repairHoles({ recheck = false } = {}) {
+    if (info?.kind !== "perp") return;
+    const my = token;
+    ensuring = true;
+    paintHoles();
+    let n = 0;
+    // 리플레이·과거 구간 보기는 실시간 다시 읽기(refill)를 안 하므로, 메웠으면 같은 시각 그대로 다시 읽는다 (봉을 바꿀 때와 같은 길)
+    const reread = () => n && my === token && (replay || windowed);
+    try {
+      n = await data.repairNow(info, tf, { recheck, holes: holes.slice() });
+    } finally {
+      if (my === token && !reread()) {
+        ensuring = false;
+        scanHoles();
+      }
+    }
+    if (reread()) load("keep", { keepReplay: true });
+  }
+
+  /** 빈 곳을 메웠다 → 칸 봉을 다시 읽는다 (가운데에 봉이 끼므로 끝부분만 읽는 refresh로는 안 된다). 보던 자리는 그대로 */
+  async function refill() {
+    if (replay || windowed || !bars.length || info?.kind !== "perp") return;
+    const my = token;
+    refilling = true;
+    paintHoles();
+    try {
+      const s = await read({ after: bars[0].t - 1, limit: Math.min(60000, bars.length + 2000) });
+      if (my !== token || replay || windowed || !s.bars.length) return;
+      lastRawT = s.lastRawT ?? lastRawT;
+      storedLastT = s.bars[s.bars.length - 1].t;
+      // 끝부분은 화면 것 그대로 (실시간 봉은 5초마다 저장돼서 저장소 것이 조금 늦을 수 있다)
+      setBars(mergeRows(s.bars, bars.filter((b) => b.t >= storedLastT)), "follow");
+    } finally {
+      if (my === token) {
+        refilling = false;
+        paintHoles();
+      }
+    }
+  }
+
   function setBars(next, view = "keep") {
     const ts = chart.timeScale();
     const atEnd = (ts.scrollPosition?.() ?? 0) >= -2;
@@ -777,6 +884,7 @@ export function createCell(env, cc) {
     const prev = bars;
     bars = next;
     gaps = tf === "1D" && info.kind !== "sentiment" && info.kind !== "perp" ? dataGaps(bars) : null;
+    scanHoles();
     applyPriceFormat();
     main.setData(toMain(bars));
     syncKrw();
@@ -829,6 +937,7 @@ export function createCell(env, cc) {
     }
     if (next[n0 - 1].t !== bars[n0 - 1].t) return setBars(next, "follow");
     bars = next;
+    if (next.length !== n0) scanHoles(); // 새 봉이 붙었다 (다시 연결된 뒤 건너뛴 봉 등)
     const from = n0 - 1;
     const pts = toMain(chartType() === "heikin" ? bars : bars.slice(from));
     const tail = chartType() === "heikin" ? pts.slice(from) : pts;
@@ -1292,6 +1401,7 @@ export function createCell(env, cc) {
       return;
     }
     info = describe(cc.symbol);
+    ensuring = info.kind === "perp"; // 저장소를 읽자마자 빈 곳이 보여도 이어 받기·메우기가 끝날 때까지는 "확인 중" (아래 3)에서 끔)
     tf = info.tfs.includes(tf) ? tf : "1D";
     cc.timeframe = tf;
     chart.applyOptions({ timeScale: { timeVisible: !daily() } });
@@ -1351,8 +1461,19 @@ export function createCell(env, cc) {
     readyDone();
     // 2) 실시간
     unsubLive = data.subscribeLive(info, tf, onLive);
-    // 3) 이어 받기 (받은 게 있으면 "bars" 이벤트로 다시 읽음)
-    const n = await data.ensure(info, tf, { front: true });
+    // 3) 이어 받기 (받은 게 있으면 "bars" 이벤트로 다시 읽음). 선물은 빈 곳 메우기도 여기서 (0.31.0) → 그동안 딱지는 "확인 중"
+    ensuring = info.kind === "perp";
+    paintHoles();
+    let n = 0;
+    try {
+      // 선물은 늘 이어 받기·빈 곳 확인 (55초 안에 받았어도). 실시간 저장 문지기도 처음에 같은 것을 해서 요청은 한 번으로 합쳐진다
+      n = await data.ensure(info, tf, { front: true, force: info.kind === "perp" });
+    } finally {
+      if (my === token) {
+        ensuring = false;
+        paintHoles();
+      }
+    }
     if (my !== token) return;
     if (!bars.length) {
       s = await read();
@@ -1582,14 +1703,27 @@ export function createCell(env, cc) {
     else if (bars.length && withLiveIntraday(bars) !== bars) updateBars(withLiveIntraday(bars));
     else paintHead();
   });
-  const offBars = data.on("bars", ({ id, tf: storedTf, partial }) => {
+  const offBars = data.on("bars", ({ id, tf: storedTf, partial, filled }) => {
     if (!info) return;
     // 비교 종목을 처음 받아 왔거나, 이 칸 봉 종류(일봉·분봉)의 새 봉이 들어왔으면 다시 읽는다
     const cmpTf = (c) => (daily() ? storedTf === "1D" || c.info.kind === "perp" : storedTf !== "1D");
     if (cmp.some((c) => c.id === id && (!c.raw.length || (!partial && cmpTf(c))))) syncCompare(true);
     const ids = info.kind === "ratio" ? info.parts : [info.id];
     if (!ids.includes(id)) return;
+    // 선물 빈 곳을 메웠다 (0.31.0): 지표가 쓰는 큰 시간봉이면 그 기억을 지우고 다시 그림, 이 칸 봉이면 통째로 다시 읽음
+    if (filled && info.kind === "perp") {
+      let hit = false;
+      for (const k of [...htfCache.keys()]) if (k.startsWith(`${storedTf}|`)) (htfCache.delete(k), (hit = true));
+      if (hit) {
+        renderIndicators(0);
+        paintLegend();
+      }
+      if (storedTf === tf && !daily()) return void refill();
+    }
     if (daily() ? storedTf === "1D" || info.kind === "perp" : storedTf !== "1D") refresh();
+  });
+  const offHoles = data.on("holes", ({ id, tf: t }) => {
+    if (info?.id === id && t === tf) paintHoles();
   });
 
   // ── ✏️ 그리기 (📏보다 먼저: 도구를 쓰는 중이면 이쪽이 먼저 받는다) ──
@@ -1911,6 +2045,11 @@ export function createCell(env, cc) {
       if ("basis" in patch || "chart_type" in patch) load("keep", { keepReplay: true });
     },
     reload: () => load("keep", { keepReplay: true }),
+    /** 선물 빈 곳 (0.31.0): 화면 봉에 남은 빈 곳 수 · 다시 받기 */
+    get holes() {
+      return holes.length;
+    },
+    repairHoles: (o) => repairHoles(o),
     redraw() {
       createMain();
       buildIndicators();
@@ -2091,6 +2230,8 @@ export function createCell(env, cc) {
       unsubLive?.();
       offQuote();
       offBars();
+      offHoles();
+      clearTimeout(holeTimer);
       offEst?.();
       drawings.destroy();
       chart.remove();

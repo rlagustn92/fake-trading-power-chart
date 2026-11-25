@@ -441,3 +441,52 @@ export class Bands extends Base {
     });
   }
 }
+
+/**
+ * 무기한선물 봉의 빈 곳 (0.31.0): 빈 곳 앞 봉(from)과 뒤 봉(to) 사이에 노란 띠·점선 + 위에 글자 ("빈 곳 21시간").
+ * 봉은 번호로 줄 서서 빈 곳이 화면에서 티가 안 난다 (시간 눈금만 건너뜀) → 따로 표시한다. list: [{from, to, label}]
+ */
+export class HoleMarks extends Base {
+  constructor() {
+    super();
+    this.list = [];
+    this._views = [viewOf((t) => this.draw(t), "bottom")];
+  }
+  setData(list) {
+    this.list = list;
+    this.update();
+  }
+  paneViews() {
+    return this._views;
+  }
+  draw(target) {
+    if (!this.chart || !this.list.length) return;
+    const ts = this.chart.timeScale();
+    const W = ts.width();
+    target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
+      const H = mediaSize.height;
+      ctx.font = '12px "Segoe UI", "Malgun Gothic", sans-serif';
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      for (const m of this.list) {
+        const x1 = ts.logicalToCoordinate(m.from);
+        const x2 = ts.logicalToCoordinate(m.to);
+        if (x1 == null || x2 == null || x2 < 0 || x1 > W) continue;
+        ctx.fillStyle = "rgba(255, 176, 32, 0.14)";
+        ctx.fillRect(x1, 0, Math.max(2, x2 - x1), H);
+        ctx.strokeStyle = "rgba(255, 176, 32, 0.85)";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        for (const x of [x1, x2]) {
+          ctx.beginPath();
+          ctx.moveTo(Math.round(x) + 0.5, 0);
+          ctx.lineTo(Math.round(x) + 0.5, H);
+          ctx.stroke();
+        }
+        ctx.setLineDash([]);
+        ctx.fillStyle = "#ffb020";
+        ctx.fillText(m.label, (x1 + x2) / 2, 6);
+      }
+    });
+  }
+}

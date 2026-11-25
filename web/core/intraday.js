@@ -11,6 +11,7 @@ import * as BN from "../sources/binance.js";
 import * as OK from "../sources/okx.js";
 import { TF_SEC, splitList, splitFactorAt } from "./bars.js";
 import { DAY, parseYmd, localDay } from "./tz.js";
+import { createLiveGate, fillHole } from "./holes.js";
 import { logInfo } from "../platform.js";
 
 /** 화면 봉 → 저장 봉 */
@@ -235,18 +236,20 @@ export async function ensurePerp(info, tf) {
   return n;
 }
 
-/** 실시간 봉 구독 (무기한선물) → 해제 함수. 받은 봉은 저장소에도 쌓는다(5초에 한 번) */
-export function subscribePerp(info, tf, cb) {
-  const pending = new Map();
+/**
+ * 실시간 봉 구독 (무기한선물) → 해제 함수. 받은 봉은 저장소에도 쌓는다(5초에 한 번).
+ * catchUp이 있으면 (0.31.0) 저장소를 실시간 봉까지 이어 받은 뒤에만 쓴다 (holes.js createLiveGate).
+ * 전에는 알림이 켜 둔 실시간 구독이 지금 봉을 먼저 써서, 앱을 꺼 둔 동안이 빈 곳으로 남았다 (2026-11-25 SOXL 5분봉 21시간).
+ */
+export function subscribePerp(info, tf, cb, { catchUp = null } = {}) {
   let timer = 0;
+  const g = createLiveGate({ sec: TF_SEC[tf] ?? 60, catchUp, write: (rows) => db.putBars(info.id, tf, rows).catch(() => {}) });
   const flush = () => {
     timer = 0;
-    const rows = [...pending.values()];
-    pending.clear();
-    if (rows.length) db.putBars(info.id, tf, rows).catch(() => {});
+    if (!g.flush()) timer = setTimeout(flush, 5000); // 아직 이어 받는 중 → 조금 뒤에
   };
   const onRow = (row) => {
-    pending.set(row.t, row);
+    g.row(row);
     if (!timer) timer = setTimeout(flush, 5000);
     cb(row);
   };
@@ -254,6 +257,30 @@ export function subscribePerp(info, tf, cb) {
   return () => {
     off();
     clearTimeout(timer);
-    flush();
+    g.flush(); // 이어 받기가 아직이면 쓰지 않는다 (다음에 이어 받기가 가져온다)
   };
+}
+
+/**
+ * 무기한선물 빈 곳 메우기 (0.31.0): holes = [[앞 봉 t, 뒤 봉 t], ...]. 거래소에서 그 사이만 다시 받아 저장한다.
+ * → {added, empty: 거래소에도 봉이 없는 곳 [[a, b], ...]}
+ */
+export async function fillPerpHoles(info, tf, holes) {
+  const sec = TF_SEC[tf];
+  const X = info.daily === "okx" ? OK : BN;
+  const page =
+    info.daily === "hyperliquid"
+      ? (s, e) => HL.candles(info.symbol, tf, s, e + 1)
+      : (s, e) => X.klines(info.symbol, tf, { startSec: s, endSec: e, limit: 1500 });
+  // 가까운 빈 곳은 한 번에 (1,000봉 안이면 요청 한 번). 거래가 드문 종목은 빈 분이 수백 군데일 수 있다 → 최근 것부터 30묶음까지만, 나머지는 다음에
+  const groups = [];
+  for (const [a, b] of holes) {
+    const g = groups[groups.length - 1];
+    if (g && b - g[0] <= 1000 * sec) g[1] = b;
+    else groups.push([a, b]);
+  }
+  const before = (await db.range(info.id, tf))?.count ?? 0;
+  const empty = [];
+  for (const g of groups.slice(-30)) empty.push(...(await fillHole(g, sec, page, (rows) => db.putBars(info.id, tf, rows))).empty);
+  return { added: ((await db.range(info.id, tf))?.count ?? 0) - before, empty };
 }

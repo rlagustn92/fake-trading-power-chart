@@ -663,6 +663,8 @@ export async function createTrading(root, { cfg, grid, replay, toast, onToggle, 
   const sesText = h("span");
   const liveStopBtn = h("button.tr-mini", { onclick: () => stopLive(), "data-tip-text": "실시간 모의매매 끝내기\n들고 있는 것은 지금 가격으로 정리돼요" }, "■ 끝내기");
   const sesLine = h("div.tr-ses", sesText, " ", liveStopBtn);
+  // 0.31.0: 매매하는 칸(없으면 고른 칸)의 선물 차트에 빈 곳이 남아 있으면 경고만 (주문은 막지 않는다)
+  const holeWarn = h("div.tr-hole", { hidden: true });
   const chartText = h("div.tr-cov");
   const chartBtns = h("div.tr-btns");
   const covText = h("div.tr-cov");
@@ -770,6 +772,7 @@ export async function createTrading(root, { cfg, grid, replay, toast, onToggle, 
   root.replaceChildren(
     h("div.tr-head", h("b.tr-title", "💰 모의매매"), h("span.tr-sub", "가상 돈 · 진짜 주문 없음"), h("div.grow"), h("button.icon", { onclick: () => toggle(false), "data-tip-text": "모의매매 창 닫기" }, "✕")),
     sesLine,
+    holeWarn,
     startBox,
     h("div.tr-card", h("div.tr-cap", "계좌 ", h("button.tr-mini", { onclick: () => resetAccount(), "data-tip-text": "잔고와 거래 기록을 처음으로" }, "↺ 처음부터")), row("잔고", cashEl), row("묶인 증거금", usedEl), row("평가 손익", upnlEl), row("합계", eqEl)),
     h("div.tr-lev", h("span.tr-label", "레버리지"), levSeg, h("span.tr-levc", levIn, "배")),
@@ -840,6 +843,9 @@ export async function createTrading(root, { cfg, grid, replay, toast, onToggle, 
     if (!isOpen) return;
     const c = cur();
     const u = openNet();
+    const nh = (ses?.cell ?? grid.current)?.holes ?? 0;
+    holeWarn.hidden = !nh;
+    holeWarn.textContent = nh ? `⚠ 이 차트에 빈 곳(노란 띠)이 ${nh}군데 있어요 · 이평선·지표가 틀릴 수 있어요 (주문은 그대로 돼요)` : "";
     startBox.hidden = !!ses;
     sesLine.hidden = !ses;
     liveStopBtn.hidden = !ses?.live;
@@ -1113,6 +1119,8 @@ export async function createTrading(root, { cfg, grid, replay, toast, onToggle, 
     onMain,
     onReplayStart,
     paintData,
+    /** 칸의 선물 빈 곳이 생기거나 없어졌다 (0.31.0) → 경고 줄 */
+    onHoles: () => paint(),
     /** 봉 색(한국식·미국식)을 바꾼 뒤 선·표시·일지를 새 색으로 (0.13.0) */
     repaint() {
       paint();

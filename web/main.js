@@ -293,8 +293,11 @@ const grid = createGrid($("#grid"), {
             { label: "📋 이 칸만 복사", onclick: () => copyImage(cell) },
           ]
         : [{ label: "📋 차트 이미지 복사", onclick: () => copyImage(cell) }];
+    // 선물 빈 곳 다시 받기 (0.31.0): 거래소에 없다고 적어 둔 곳도 다시 물어본다
+    if (cell.info?.kind === "perp") items.push({ label: "🩹 이 차트 빈 곳 다시 받기", onclick: () => (toast("빈 곳을 거래소에서 다시 받아요", 3000), cell.repairHoles({ recheck: true })) });
     openMenu(null, items, { x: e.clientX, y: e.clientY });
   },
+  onHoles: (cell) => trading.onHoles?.(cell), // 💰 주문 창 "빈 곳" 경고
 });
 
 let pickCb = null; // 백테스트 화면에서 고를 때는 그쪽으로

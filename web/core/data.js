@@ -13,7 +13,8 @@ import * as BN from "../sources/binance.js";
 import * as OK from "../sources/okx.js";
 import * as TS from "../sources/toss.js";
 import * as db from "./db.js";
-import { isDailyTf, isLongTf, TIMEFRAMES } from "./bars.js";
+import { isDailyTf, isLongTf, TIMEFRAMES, TF_SEC } from "./bars.js";
+import * as H from "./holes.js";
 import { DAY, tzOffset } from "./tz.js";
 import { logInfo, listen, invoke, inTauri } from "../platform.js";
 import { marketOpen, noteLastBar } from "./session.js";
@@ -56,6 +57,8 @@ export function createData(cfg) {
   const inflight = new Map(); // key → Promise
   let needKeyShown = false;
 
+  const failed = new Set(); // 마지막 받기가 실패한 key (실시간 저장 문지기가 본다)
+
   function run(key, freshMs, force, work) {
     if (inflight.has(key)) return inflight.get(key);
     if (!force && Date.now() - (fresh.get(key) ?? 0) < freshMs) return Promise.resolve(0);
@@ -63,11 +66,13 @@ export function createData(cfg) {
       try {
         const n = await work();
         fresh.set(key, Date.now());
+        failed.delete(key);
         lastUpdate = Date.now();
         emit("updated", lastUpdate);
         return n;
       } catch (e) {
         fresh.set(key, Date.now() - freshMs + 15e3); // 실패하면 15초 뒤에 다시
+        failed.add(key);
         console.warn(`[data] ${key}`, e?.message ?? e);
         emit("error", { key, error: String(e?.message ?? e) });
         return 0;
@@ -78,6 +83,88 @@ export function createData(cfg) {
   }
 
   const label = (info) => info.label;
+
+  // ── 무기한선물 빈 곳 (0.31.0) ──
+  // 24시간 시장이라 봉 사이가 벌어지면 빠진 것. 차트가 처음 읽는 만큼(최근 HOLE_WINDOW봉)에서 찾아 그 사이만 거래소에서 다시 받는다.
+  // 거래소에도 봉이 없는 곳(점검·거래 없음)은 meta `종목|봉|empty_holes`에 앞 봉 시각을 적어 두고 다시 묻지 않는다 (표시도 안 함)
+  const HOLE_WINDOW = 4000;
+  const holeStates = new Map(); // key → {state: "filling"|"done"|"failed"|"ok", missing, holes, added, at}
+  const emptyHoles = new Map(); // key → Set(앞 봉 t)
+  async function knownEmpty(key) {
+    if (!emptyHoles.has(key)) emptyHoles.set(key, new Set((await db.metaGet(`${key}|empty_holes`).catch(() => null)) ?? []));
+    return emptyHoles.get(key);
+  }
+  function setHoleState(info, tf, st) {
+    const key = `${info.id}|${tf}`;
+    const prev = holeStates.get(key);
+    if (st.state === "ok" && (!prev || prev.state === "ok")) return; // 아무 일 없음
+    holeStates.set(key, { ...st, at: Date.now() });
+    emit("holes", { id: info.id, tf, ...st });
+  }
+  async function repairHoles(info, tf, j = null, given = null) {
+    const sec = TF_SEC[tf];
+    if (!sec || isLongTf(tf)) return 0;
+    const key = `${info.id}|${tf}`;
+    const empty = await knownEmpty(key);
+    // given = 칸이 보고 있는 빈 곳 (리플레이·과거 구간처럼 최근 봉 밖일 수 있다), 없으면 최근 봉에서 찾는다.
+    // given은 저장소에서 다시 본다 (방금 이어 받기가 이미 메웠을 수 있다)
+    let found = [];
+    if (given) for (const [a, b] of given) found.push(...H.findHoles(await db.getBars(info.id, tf, { after: a, before: b + 1, limit: 200000 }), sec));
+    else found = H.findHoles(await db.getBars(info.id, tf, { limit: HOLE_WINDOW }), sec);
+    const holes = found.filter(([a]) => !empty.has(a));
+    if (!holes.length) {
+      setHoleState(info, tf, { state: "ok" });
+      return 0;
+    }
+    const missing = holes.reduce((s, h) => s + H.missingOf(h, sec), 0);
+    setHoleState(info, tf, { state: "filling", missing, holes: holes.length });
+    j?.set(`빈 곳 메우는 중 ${label(info)} ${tfName(tf)} · ${missing}봉`);
+    try {
+      const r = await I.fillPerpHoles(info, tf, holes);
+      if (r.empty.length) {
+        for (const [a] of r.empty) empty.add(a);
+        await db.metaSet(`${key}|empty_holes`, [...empty].slice(-500));
+      }
+      logInfo(`[data] ${info.id} ${tf} 빈 곳 ${holes.length}군데 · ${r.added}봉 메움${r.empty.length ? ` · 거래소에도 없음 ${r.empty.length}군데` : ""}`);
+      setHoleState(info, tf, { state: "done", added: r.added });
+      if (r.added) emit("bars", { id: info.id, tf, filled: true });
+      return r.added;
+    } catch (e) {
+      console.warn("[data] 빈 곳 메우기", key, e?.message ?? e);
+      setHoleState(info, tf, { state: "failed", missing, holes: holes.length });
+      return 0;
+    }
+  }
+  /** 실시간 저장 문지기가 부르는 이어 받기 → 성공했나 */
+  async function catchUpPerp(info, tf) {
+    await ensure(info, tf, { force: true });
+    return !failed.has(`${info.id}|${tf}`);
+  }
+  /**
+   * 빈 곳 다시 받기 (칸의 딱지·오른쪽 클릭). recheck = 거래소에 없다고 적어 둔 곳도 다시 물어봄.
+   * holes = 칸이 보고 있는 빈 곳 → 이어 받기·최근 봉 확인 뒤에 그 곳들도 받는다. 반환: 새로 들어온 봉 수
+   */
+  async function repairNow(info, tf, { recheck = false, holes = null } = {}) {
+    if (isLongTf(tf)) tf = "1D";
+    const key = `${info.id}|${tf}`;
+    if (recheck) {
+      emptyHoles.delete(key);
+      await db.metaSet(`${key}|empty_holes`, null);
+    }
+    let n = await ensure(info, tf, { force: true });
+    if (holes?.length) {
+      const j = job(`빈 곳 메우는 중 ${label(info)} ${tfName(tf)}`);
+      try {
+        n += await repairHoles(info, tf, j, holes);
+      } finally {
+        j.done();
+      }
+    }
+    return n;
+  }
+  /** 칸이 그릴 때 쓰는 것: 지금 빈 곳 상태 · 거래소에도 없다고 적어 둔 곳 (아직 안 읽었으면 빈 Set) */
+  const holeState = (id, tf) => holeStates.get(`${id}|${tf}`) ?? null;
+  const exchangeEmpty = (id, tf) => emptyHoles.get(`${id}|${tf}`) ?? new Set();
 
   /** 이 칸이 그릴 데이터를 저장소에 준비 (없으면 받고, 오래됐으면 이어 받기) */
   function ensure(info, tf, { force = false, front = false } = {}) {
@@ -90,7 +177,8 @@ export function createData(cfg) {
         try {
           const n = await I.ensurePerp(info, tf);
           if (n) emit("bars", { id: info.id, tf });
-          return n;
+          // 이어 받은 뒤 최근 봉에 빈 곳이 있으면 그 사이만 다시 받는다 (0.31.0). 지표의 큰 시간봉도 이 길로 온다 (cell.js fetchHtf)
+          return n + (await repairHoles(info, tf, j));
         } finally {
           j.done();
         }
@@ -253,7 +341,8 @@ export function createData(cfg) {
     if (!s) {
       s = { info, tf, cbs: new Set(), off: null };
       // 월봉·년봉 무기한선물은 거래소 봉 스트림이 없다 → 현재가(quote)로 마지막 봉을 고친다 (cell.js withLiveDaily)
-      if (info.kind === "perp" && !isLongTf(tf)) s.off = I.subscribePerp(info, tf, (row) => s.cbs.forEach((f) => f({ type: "bar", row })));
+      // 저장은 이어 받기가 끝난 뒤에만 (0.31.0, catchUp): 알림이 켜 둔 구독이 지금 봉을 먼저 써서 그 앞이 빈 곳으로 남았다
+      if (info.kind === "perp" && !isLongTf(tf)) s.off = I.subscribePerp(info, tf, (row) => s.cbs.forEach((f) => f({ type: "bar", row })), { catchUp: () => catchUpPerp(info, tf) });
       live.set(key, s);
     }
     s.cbs.add(cb);
@@ -501,6 +590,9 @@ export function createData(cfg) {
     tossKey: () => TS.keyStatus(),
     fillGaps,
     ensure,
+    repairNow, // 0.31.0 선물 빈 곳 다시 받기
+    holeState,
+    exchangeEmpty,
     catchUpAll,
     downloadAll,
     subscribeLive,

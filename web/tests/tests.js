@@ -353,7 +353,16 @@ check("XIRR: 1년 뒤 10% → 10%", xirr([[0, -1000], [365 * day, 1100]]), 0.1, 
       const zx = CB.zoneBoxes(zb);
       check("매물영역 상자: 0~7봉 = 100~110 (8번 봉이 밖으로 나감) · 9번 봉부터 새 상자는 아직 안 끝나서 안 냄", [zx.length, zx[0]?.s, zx[0]?.e, zx[0]?.lo, zx[0]?.hi], [1, 0, 7, 100, 110]);
       const zl = (n) => CB.liveZones(zx, zb, n);
-      check("매물영역: 상자 마지막 봉 뒤 72봉(18시간)이 지나야 가까운 영역에 쓰고, 개수에는 바로 셈", [zl(79).count, zl(79).list.length, zl(80).count, zl(80).list.length], [1, 0, 1, 1]);
+      // 0.31.0: 8번 봉은 저가만 밖 · 9번 봉부터 봉 전체가 상자 아래 → 그 뒤 11봉(20번 봉)이 끝나야 보임
+      check("매물영역: 봉 전체가 상자 밖인 첫 봉(9번) 뒤 11봉이 끝나야 가까운 영역에 쓰고, 개수에는 바로 셈", [zl(20).count, zl(20).list.length, zl(21).count, zl(21).list.length], [1, 0, 1, 1]);
+      // 큰 상자(100~110) 안에 작은 상자(103~107)가 통째로 들어가면 작은 상자는 안 보임 (개수에는 셈)
+      const zn = mk3([...Array(5).fill([105, 110, 100, 105]), ...Array(3).fill([104, 108, 102, 104]), [106, 111, 103, 109], ...Array(5).fill([105, 107, 103, 105]), ...Array(2).fill([105, 106, 104, 105]), [100, 104, 95, 96], ...Array(30).fill([55, 60, 50, 55])]);
+      const znr = CB.liveZones(CB.zoneBoxes(zn), zn, 29);
+      check("매물영역: 다른 상자 안에 통째로 든 상자는 가까운 영역·차트 상자에서 빼고 개수에는 셈", [znr.count, znr.list.length, znr.list[0]?.hi], [2, 1, 110]);
+      // 상자 5개가 다 살아 있으면 개수는 4개까지, 보이는 상자도 최근 4개
+      const z5 = mk3([...[0, 1, 2, 3, 4].flatMap((k) => { const L = 1000 - 100 * k; return [...Array(7).fill([L, L + 5, L - 5, L]), [L, L, L - 60, L - 50]]; }), ...Array(40).fill([400, 405, 395, 400])]);
+      const z5r = CB.liveZones(CB.zoneBoxes(z5), z5, z5.length);
+      check("매물영역: 살아 있는 상자가 5개여도 개수는 4개, 보이는 상자는 최근 4개", [z5r.count, z5r.list.length, z5r.list[0]?.hi], [4, 4, 905]);
       const zb2 = [...zb, ...mk3([[55, 130, 55, 120]])];
       check("매물영역: 상자 뒤 종가가 아래로도 위로도 상자 밖에서 마감하면 지움 · 첫 봉이 200봉보다 오래되면 안 셈", [CB.liveZones(CB.zoneBoxes(zb2), zb2, zb2.length).list.length, zl(201).count, CB.liveZones(zx, zb, 99).count], [0, 0, 1]);
       // 0.30.2: 1H·4H만 본다 — 11/25 16:06 BTCUSDT 3분봉은 지금 봉이 구름 위(롱 우세)인데 1H·4H 숏 → "큰 방향 숏 일치"
@@ -925,6 +934,54 @@ section("VWAP 1배·2배 (0.26.0)");
 
 }
 
+// ── 선물 빈 곳 (0.31.0): 찾기 · 메우기 · 실시간 저장 문지기 (가짜 거래소·가짜 저장소로, 인터넷·저장소 없이) ──
+section("선물 빈 곳 (0.31.0)");
+{
+  const HO = await import("../core/holes.js");
+  const yes = (v) => (v ? 1 : 0);
+  const tb = (ts) => ts.map((t) => ({ t, o: 1, h: 1, l: 1, c: 1, v: 1 }));
+  const hs = HO.findHoles(tb([0, 60, 120, 300, 360, 600]), 60);
+  check("빈 곳 찾기: 120→300 (2봉 빠짐) · 360→600 (3봉 빠짐), 이어진 곳은 아님", [hs.length, ...hs.flat(), HO.missingOf(hs[0], 60), HO.missingOf(hs[1], 60)], [2, 120, 300, 360, 600, 2, 3]);
+  check("빈 곳 길이 글자: 5분봉 15분 · 21시간 · 3일", [HO.holeSpan([0, 1200], 300) === "15분", HO.holeSpan([0, 21 * 3600 + 300], 300) === "21시간", HO.holeSpan([0, 3 * 86400 + 3600], 3600) === "3일"].map(yes), [1, 1, 1]);
+  // 가짜 거래소: 1분봉 120~540초 중 300·360은 거래소에도 없음. 한 번에 3개씩만 줌
+  const ex = [120, 180, 240, 420, 480, 540, 600].map((t) => ({ t, o: 2, h: 2, l: 2, c: t, v: 1 }));
+  const putRows = [];
+  let pages = 0;
+  const page = async (s, e) => (pages++, ex.filter((k) => k.t >= s && k.t <= e).slice(0, 3));
+  const fr = await HO.fillHole([120, 600], 60, page, async (rows) => putRows.push(...rows));
+  check("빈 곳 메우기: 앞 봉(120)도 다시 받음 · 안쪽 5봉 들어옴 · 거래소에도 없는 240→420은 남김 · 600(뒤 봉)은 안 건드림", [putRows[0].t, fr.added, fr.empty.length, ...fr.empty.flat(), putRows.some((k) => k.t === 600) ? 1 : 0, pages], [120, 5, 1, 240, 420, 0, 2]);
+  // 실시간 저장 문지기: 이어 받기가 끝나기 전에는 쓰지 않는다
+  let clock = 0;
+  const written = [];
+  let release;
+  let calls = 0;
+  let answer = true;
+  const catchUp = () => (calls++, new Promise((r) => (release = () => r(answer))));
+  const g = HO.createLiveGate({ sec: 60, catchUp, write: (rows) => written.push(...rows.map((r) => r.t)), now: () => clock, retryMs: 15000 });
+  g.row({ t: 600 });
+  const before = [g.flush(), written.length, calls];
+  release();
+  await g.waiting;
+  const after = [g.flush(), written.join(",")];
+  check("실시간 저장: 첫 봉이 오면 이어 받기 시작 · 끝나기 전에는 안 씀 · 끝나면 모아 둔 봉을 씀", [...before.map(Number), ...after.map((x) => (typeof x === "boolean" ? Number(x) : x === "600" ? 1 : 0))], [0, 0, 1, 1, 1]);
+  g.row({ t: 660 });
+  const sameCalls = calls;
+  g.row({ t: 840 }); // 720·780을 건너뜀 (다시 연결·절전)
+  const jumped = [calls - sameCalls, Number(g.flush())];
+  answer = false; // 이번 이어 받기는 실패
+  release();
+  await g.waiting;
+  clock = 5000;
+  const failNow = [Number(g.flush()), calls];
+  clock = 16000;
+  g.flush(); // 15초가 지나 다시 이어 받기
+  answer = true;
+  release();
+  await g.waiting;
+  const ok2 = [Number(g.flush()), written.join(",")];
+  check("실시간 저장: 봉을 건너뛰면 다시 이어 받기 · 실패하면 안 쓰고 15초 뒤 다시 · 성공하면 그때 씀", [...jumped, ...failNow, ...ok2.map((x) => (x === "600,660,840" ? 1 : x))], [1, 0, 0, 2, 1, 1]);
+}
+
 // ── OKX (0.25.0): 100개씩 주는 거래소를 바이낸스 klines와 같은 약속으로 감싼다 (가짜 거래소로, 인터넷 없이) ──
 section("OKX 무기한선물 (0.25.0)");
 {
@@ -994,7 +1051,7 @@ section("국내 종목 선물 원화 딱지");
 // ── 모든 화면 파일이 문법 오류 없이 읽히는지 (하나라도 깨지면 EXE가 검은 화면에서 멈춘다) ──
 section("파일 읽기 (문법 오류 없는지)");
 {
-  const MODULES = ["alerts/engine", "backtest/engine", "backtest/view", "config", "core/bars", "core/colors", "core/csv", "core/events", "core/daily", "core/data", "core/db", "core/estimate", "core/intraday", "core/krw", "core/limit", "core/series", "core/session", "core/stocklist", "core/symbols", "core/tz", "drawings/geom", "drawings/layer", "drawings/store", "indicators/calc", "indicators/cloudboard", "indicators/explain", "indicators/guides", "indicators/index", "indicators/setups", "indicators/sentiment", "indicators/triangle", "platform", "sources/alpaca", "sources/binance", "sources/hyperliquid", "sources/okx", "sources/reconnect", "sources/sentiment", "sources/status", "sources/toss", "sources/yahoo", "trade/engine", "trade/history", "trade/journal", "trade/orderlines", "trade/panel", "ui/alerts", "ui/cell", "ui/dialog", "ui/dom", "ui/drawbar", "ui/format", "ui/goto", "ui/grid", "ui/indpanel", "ui/measure", "ui/menu", "ui/picker", "ui/primitives", "ui/replay", "ui/search", "ui/settings", "ui/sidebar", "ui/snapshot", "ui/statusbar", "ui/tip", "ui/toolbar", "ui/update", "ui/welcome"];
+  const MODULES = ["alerts/engine", "backtest/engine", "backtest/view", "config", "core/bars", "core/colors", "core/csv", "core/events", "core/daily", "core/data", "core/db", "core/estimate", "core/holes", "core/intraday", "core/krw", "core/limit", "core/series", "core/session", "core/stocklist", "core/symbols", "core/tz", "drawings/geom", "drawings/layer", "drawings/store", "indicators/calc", "indicators/cloudboard", "indicators/explain", "indicators/guides", "indicators/index", "indicators/setups", "indicators/sentiment", "indicators/triangle", "platform", "sources/alpaca", "sources/binance", "sources/hyperliquid", "sources/okx", "sources/reconnect", "sources/sentiment", "sources/status", "sources/toss", "sources/yahoo", "trade/engine", "trade/history", "trade/journal", "trade/orderlines", "trade/panel", "ui/alerts", "ui/cell", "ui/dialog", "ui/dom", "ui/drawbar", "ui/format", "ui/goto", "ui/grid", "ui/indpanel", "ui/measure", "ui/menu", "ui/picker", "ui/primitives", "ui/replay", "ui/search", "ui/settings", "ui/sidebar", "ui/snapshot", "ui/statusbar", "ui/tip", "ui/toolbar", "ui/update", "ui/welcome"];
   const broken = [];
   for (const m of MODULES) {
     try {

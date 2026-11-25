@@ -193,7 +193,7 @@ export function alignText(h1, h4) {
  *   나간 봉이 끝난 상자만 낸다 (상자는 나중에야 알 수 있다). 앞 봉부터 차례로 세므로 n봉까지 자른 결과와 앞부분이 같다.
  * → [{s, e, lo, hi}] (s~e = 상자 봉 번호)
  */
-export const ZONE = { seed: 5, min: 6, look: 200, age: 72 };
+export const ZONE = { seed: 5, min: 6, look: 200, exit: 11, cap: 4 };
 export function zoneBoxes(bars, o = ZONE) {
   const out = [];
   let s = 0;
@@ -213,29 +213,38 @@ export function zoneBoxes(bars, o = ZONE) {
   return out;
 }
 /**
- * 끝난 매물영역 봉이 n개일 때 쓰는 상자 (boxes = zoneBoxes(bars)):
- *   상자 봉이 min(6)개 이상 (앞 5봉 뒤로 한 봉 이상 안에 머묾) · 상자 첫 봉이 최근 look(200)봉 안 ·
- *   상자가 끝난 뒤 종가가 위로도 아래로도 상자 밖에서 마감한 적이 있으면 지움.
- *   count = 이렇게 남은 상자 수 (8번 줄), list = 그중 상자 마지막 봉 뒤로 age(72)봉(15분봉 18시간)이 지난 것 (9번 줄·차트 상자)
+ * 끝난 매물영역 봉이 n개일 때 쓰는 상자 (boxes = zoneBoxes(bars), 0.31.0):
+ *   살아 있는 상자 = 상자 봉이 min(6)개 이상 (앞 5봉 뒤로 한 봉 이상 안에 머묾) · 상자 첫 봉이 최근 look(200)봉 안 ·
+ *     상자가 끝난 뒤 종가가 위로도 아래로도 상자 밖에서 마감한 적이 없음.
+ *   count = 살아 있는 상자 수, 많아야 cap(4)개 (8번 줄).
+ *   list = 보이는 상자 (9번 줄·차트 상자), 최근 것부터 cap(4)개까지:
+ *     상자가 끝난 뒤 봉 전체가 상자 밖에 있는 봉(고가 < 아래 끝 또는 저가 > 위 끝)이 처음 나오고, 그 뒤로 exit(11)봉이 더 끝난 상자.
+ *     다른 살아 있는 상자 안에 통째로 들어가는 상자는 뺀다.
  * → {count, list: [{s, e, lo, hi}]}
  */
 export function liveZones(boxes, bars, n, o = ZONE) {
-  let count = 0;
-  const list = [];
+  const live = [];
   for (const z of boxes) {
     if (z.e + 1 >= n) break;
     if (z.e - z.s + 1 < o.min || n - z.s > o.look) continue;
     let up = false;
     let dn = false;
+    let out = -1; // 봉 전체가 상자 밖에 있는 첫 봉
     for (let j = z.e + 1; j < n && !(up && dn); j++) {
-      if (bars[j].c > z.hi) up = true;
-      if (bars[j].c < z.lo) dn = true;
+      const b = bars[j];
+      if (b.c > z.hi) up = true;
+      if (b.c < z.lo) dn = true;
+      if (out < 0 && (b.h < z.lo || b.l > z.hi)) out = j;
     }
     if (up && dn) continue;
-    count++;
-    if (n - 1 - z.e >= o.age) list.push(z);
+    live.push({ z, shown: out >= 0 && n - 1 - out >= o.exit });
   }
-  return { count, list };
+  const inside = (z) => live.some((w) => w.z !== z && w.z.lo <= z.lo && w.z.hi >= z.hi);
+  const list = live
+    .filter((w) => w.shown && !inside(w.z))
+    .map((w) => w.z)
+    .slice(-o.cap);
+  return { count: Math.min(live.length, o.cap), list };
 }
 /** 가장 가까운 상자와 가격의 위치 → {z, where: "안"·"아래"·"위"} 또는 null */
 export function nearestZone(zones, c) {

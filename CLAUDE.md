@@ -106,8 +106,13 @@ Tauri 2 Windows app for paper trading on replayed charts. It is a clone of `POWE
     - 0.30.2 rules, checked bar by bar on BTCUSDT 3m, 2026-11-25 05:00–16:21 KST (228 closed bars):
       - Rows 8–9 zones (`zoneBoxes`, `liveZones`, `ZONE`). All 228 bars matched (count and nearest zone). Zones use 15m bars on charts below 15m.
         - Boxes are a chain from the first bar. The first 5 bars set the high–low. The box grows while each next bar's high and low stay inside. The first bar outside ends the box, and the next box starts on the bar after it.
-        - A box counts if it has at least 6 bars, its first bar is within the last 200 bars, and closes after it have not gone both above and below it.
-        - Row 8 counts these boxes. Row 9 and the drawn boxes use only those whose last bar is at least 72 bars (18 h) old.
+        - A box is live if it has at least 6 bars, its first bar is within the last 200 bars, and closes after it have not gone both above and below it.
+        - 0.31.0 changed rows 8–9 (`ZONE.exit`, `ZONE.cap`). It matches the 228 bars above and 11 more closed bars from 18:15 to 21:51.
+          - Row 8 counts live boxes, capped at 4.
+          - A box is shown in row 9 and drawn once 11 zone bars have closed after the first bar that lies fully outside it (high < box low or low > box high).
+          - A box that sits fully inside another live box is not shown.
+          - Shown boxes are the latest 4.
+          - The 0.30.2 rule (shown 72 bars after the box's last bar) fit the morning bars but not the evening: a box appeared 13 bars after its end. "13 bars after the end" broke 174 of the 228 morning bars.
         - Boxes are drawn over their own bars and do not extend to now.
         - The look-back works anywhere from 176 to 220 bars; 200 was picked.
       - Row 5 2·4·6·8 (`ladderAt`, 3m only).
@@ -124,6 +129,20 @@ Tauri 2 Windows app for paper trading on replayed charts. It is a clone of `POWE
   - Auto fib: `autoFib(bars, look, end, log)`, with `back(c)` and an `ext` param.
   - Handles with `scaleAware: true` (auto fib, auto triangle) are re-rendered by `setView({scale})`.
   - Scale badge: `scaleEl` in the cell head shows 로그/일반/%; a click toggles log and normal.
+- 0.31.0 perp holes (the user saw SOXL 5m jump from 00:15 to 21:25 after an update; the bug was older than the update):
+  - Cause: an alert keeps a live subscription (`alerts/engine.js` `syncSubs`), and `subscribePerp` used to write the current bar before any catch-up. `ensurePerp` continues from the store's last bar, so the time the app was off was skipped for good.
+  - `core/holes.js` (pure, tested): `findHoles`, `fillHole`, `createLiveGate`. The gate keeps live rows in memory until `catchUp()` succeeds. It runs on the first row and whenever a row skips a bar (reconnect, wake), and retries every 15 s on failure.
+  - `data.js`: `subscribeLive` passes `catchUp` (= `ensure(force)` plus the `failed` set). The perp `ensure` also runs `repairHoles` on the latest 4,000 stored bars and fills only the gaps (`intraday.fillPerpHoles`, re-fetching the bar before each gap because the bar at app close is partial).
+    - Gaps the exchange also lacks go to meta `id|tf|empty_holes` and are never shown.
+    - Events: `holes` {state: filling/done/failed/ok} and `bars` with `filled: true`.
+    - `repairNow(info, tf, {recheck, holes})` also fills the gaps the cell is showing, which can be outside the recent window in replay or a past view.
+  - `cell.js`: `scanHoles` on every `setBars`, the head badge `holeEl`, `HoleMarks` bands (`ui/primitives.js`), `refill()` re-reads from the first shown bar on `filled` (keeps the in-memory tail, view via "follow"), and invalidates the `htfCache` of a filled higher timeframe.
+    - Perp loads now always call `ensure` with `force`, so the gap check runs every time. The live gate's catch-up shares the same in-flight request.
+    - In replay or a past view, a successful manual fill calls `load("keep", {keepReplay: true})`.
+  - Guards:
+    - Alerts reset `lastSide` for that symbol on `filled`.
+    - Live paper trading only reads bars at or after its last snapshot, so inserted past bars do not fill anything. Checked on the dev server while 📡 was running.
+    - The 💰 panel only warns (`.tr-hole`) and never blocks orders.
 - 0.19.1 ruler right-click (the user chose the plain rule): `measure.js` handles `contextmenu` in the capture phase on the cell body. While measuring (`dragging` or `waitingB`) it clears, otherwise with the ruler on it turns the ruler off (the result stays), and with the ruler off it passes through to the copy menu. `drawings/layer.js` returns early from its `contextmenu` while `measureOn()`, so a drawn line under the pointer doesn't take the click.
 - Old versions for downgrades: from 0.15.0, GitHub Releases keeps every version's EXE, so don't make versioned copies in `release\` any more (the user decided this on 2026-11-03). The older copies (`release\FAKE TRADING POWER CHART <ver>.exe`, 0.12.1 to 0.14.1) stay because they aren't on GitHub. The desktop shortcut points to the unversioned latest EXE.
 - Hooks added to original files are small and commented: `ui/cell.js` (1-minute replay stepping with partial bars, keep replay across timeframe changes, `onMain`/`onReplayStart` hooks, `setTradeMarkers`), `ui/replay.js` (🎲 random start, `onBegin`/`onStep`/`onStop`), `main.js`, `ui/toolbar.js`, `index.html`, `styles.css`.
@@ -141,7 +160,7 @@ Tauri 2 Windows app for paper trading on replayed charts. It is a clone of `POWE
 
 ## Working rules
 - **Explain first, fix when told** (the user's rule, 2026-11-01): for a problem report or a "확인해 봐", explain the cause, the planned fix and its side effects in plain Korean, and wait. "고쳐줘", "만들어" or "넣어" means go ahead. Fills must match real exchanges as closely as possible ("실제와 같은 게 중요해"). State any difference before changing replay, fills or liquidation.
-- `web/` is plain ES modules with no bundler. Dev server: `python tools/devserver.py 5280`. Tests: http://localhost:5280/tests/test.html — all must pass (236 on 2026-11-25). They also import every module, which catches syntax errors that would give the EXE a black screen. Add new modules to the `MODULES` list there.
+- `web/` is plain ES modules with no bundler. Dev server: `python tools/devserver.py 5280`. Tests: http://localhost:5280/tests/test.html — all must pass (243 on 2026-11-25). They also import every module, which catches syntax errors that would give the EXE a black screen. Add new modules to the `MODULES` list there.
 - Versions: follow [CHANGELOG.md](CHANGELOG.md). Bump `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and the root package in `src-tauri/Cargo.lock`, add an entry. Patch for fixes, minor for features.
 - **Source lives in a public GitHub repo (since 2026-11-03, 0.15.0): https://github.com/rlagustn92/fake-trading-power-chart.** The user wants only the EXE and the `%APPDATA%` data on their PCs. This setup was copied from the original app (its 1.4.0), with only the names changed.
   - Release = version bump + CHANGELOG + push to `main`. Don't push tags by hand. [.github/workflows/build.yml](.github/workflows/build.yml) sees a version with no Release yet, builds the EXE on GitHub's Windows runner, then creates the tag `v<version>` and the Release with `FAKE-TRADING-POWER-CHART.exe`. Pushes that don't bump the version skip the build.

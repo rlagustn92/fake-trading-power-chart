@@ -130,6 +130,12 @@ button.icon.on { background: var(--primary); border-color: var(--primary); }
 .ch-badge { color: var(--muted); font-size: 13px; border: 1px solid var(--btn-line); border-radius: 6px; padding: 0 6px; }
 .ch-badge:empty { display: none; }
 .ch-badge.live { color: #3ccf6e; border-color: #2d6a3e; }
+/* 0.31.0 선물 빈 곳 딱지: 메우는 중(노랑) · 다 메움(초록, 잠깐) · 못 메움(노랑 테두리, 누르면 다시 받기) */
+.ch-hole { font-size: 13px; line-height: 1.4; padding: 0 7px; border-radius: 6px; border: 1px solid #6b5a1e; background: rgba(255, 176, 32, 0.12); color: #ffb020; cursor: default; }
+.ch-hole[hidden] { display: none; }
+.ch-hole.warn { cursor: pointer; border-color: #ffb020; }
+.ch-hole.warn:hover { background: rgba(255, 176, 32, 0.25); }
+.ch-hole.ok { color: #3ccf6e; border-color: #2d6a3e; background: rgba(60, 207, 110, 0.1); }
 .cell-body { flex: 1 1 auto; min-height: 0; position: relative; }
 .cell-body.measuring { cursor: crosshair; touch-action: none; }
 .cell-msg {
@@ -603,6 +609,8 @@ table.keys td { padding: 6px 12px 6px 0; font-size: 16px; }
 .tr-sub { color: var(--muted); font-size: 13px; }
 .tr-ses { font-weight: 700; color: #c9b8ff; line-height: 1.4; }
 .tr-ses[hidden], .tr-start[hidden] { display: none; }
+.tr-hole { margin: 6px 0; padding: 6px 10px; border-radius: 6px; border: 1px solid #6b5a1e; background: rgba(255, 176, 32, 0.12); color: #ffb020; line-height: 1.4; }
+.tr-hole[hidden] { display: none; }
 .tr-start { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid #3b2f6b; background: #17142a; border-radius: 10px; }
 .tr-go { font-size: 19px; font-weight: 800; min-height: 54px; }
 .tr-go2 { font-size: 16px; }

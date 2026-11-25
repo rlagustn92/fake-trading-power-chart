@@ -84,6 +84,12 @@ export function createAlerts({ cfg, data, onFire, onChange }) {
   const subs = new Map(); // `${sym}|${tf}` → 해제 함수 (실시간 갱신 받기)
   const lastSide = new Map(); // 실시간 확인: id → 지난번 위치
   let busy = false;
+  // 선물 빈 곳을 메웠다 (0.31.0): 지난 봉이 바뀌어 이평선 같은 기준값도 바뀐다 → 실시간 알림은 기준만 다시 잡는다
+  // (빈 곳이 있을 때 잰 지난번 위치와 메운 뒤 값을 비교하면 "방금 넘었다"로 잘못 울릴 수 있다)
+  data.on?.("bars", ({ id, filled }) => {
+    if (!filled) return;
+    for (const a of list()) if (a.sym === id) lastSide.delete(a.id);
+  });
 
   const list = () => (cfg.alerts ??= []);
   const active = () => list().filter((a) => a.on);
