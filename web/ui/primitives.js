@@ -21,6 +21,61 @@ class Base {
   }
 }
 
+/**
+ * 오른쪽 눈금에 글자 딱지 하나 (0.30.0 원화 딱지): set(가격, 글자, {back, fore, pane}).
+ * 시리즈의 이름표는 눈금의 숫자 모양(달러)을 따라서 다른 글자를 못 쓴다 → 직접 그린다.
+ * 라이브러리가 다른 이름표와 안 겹치게 비켜 놓는다 (fixedCoordinate가 없으면). 높이를 0.5px 낮게 둬서 같은 높이의 현재가 딱지 아래로 간다.
+ * pane = 차트 오른쪽 끝, 그 높이 바로 위에 쓰는 작은 글자 (가격선 title은 눈금 이름표를 켜야만 보여서 따로 그린다)
+ */
+const NO_VIEWS = [];
+export class AxisTag extends Base {
+  constructor() {
+    super();
+    this.price = null;
+    this.text = "";
+    this.opt = { back: "#ffb020", fore: "#0b0d10", pane: "" };
+    this.y = null;
+    const me = this;
+    this._views = [
+      {
+        coordinate: () => (me.y ?? -1000) + 0.5,
+        text: () => me.text,
+        textColor: () => me.opt.fore,
+        backColor: () => me.opt.back,
+        visible: () => me.y != null && !!me.text,
+        tickVisible: () => false,
+      },
+    ];
+    this._paneViews = [viewOf((t) => this.draw(t), "top")];
+  }
+  set(price, text, opt = {}) {
+    const o = { ...this.opt, ...opt };
+    if (price === this.price && text === this.text && o.back === this.opt.back && o.fore === this.opt.fore && o.pane === this.opt.pane) return;
+    Object.assign(this, { price, text, opt: o });
+    this.update();
+  }
+  updateAllViews() {
+    this.y = this.series && this.price != null ? this.series.priceToCoordinate(this.price) : null;
+  }
+  priceAxisViews() {
+    return this._views;
+  }
+  paneViews() {
+    return this.opt.pane ? this._paneViews : NO_VIEWS;
+  }
+  draw(target) {
+    const y = this.y;
+    if (y == null || !this.opt.pane) return;
+    target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
+      ctx.font = '13px "Segoe UI", "Malgun Gothic", sans-serif';
+      ctx.fillStyle = this.opt.fore === "#0b0d10" ? this.opt.back : this.opt.fore;
+      ctx.textAlign = "right";
+      ctx.textBaseline = "bottom";
+      ctx.fillText(this.opt.pane, mediaSize.width - 8, y - 3);
+    });
+  }
+}
+
 /** 두 선 사이 칠하기 (볼린저 밴드). data: [{time, up, dn}] (봉 순서와 같은 길이, 빈 값은 null) */
 export class BandFill extends Base {
   constructor(color) {

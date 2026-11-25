@@ -71,6 +71,8 @@ export function createSettings(root, app) {
       row("심리 지표 설명", toggle(() => c.show_sentiment_events, set("show_sentiment_events")), note("VIX·풋/콜·공포탐욕에 단계 색 띠와 과거 사건 표시")),
       row("FOMC 날짜 표시", toggle(() => c.show_fomc ?? false, set("show_fomc")), note("차트 아래에 보라색 FOMC 표시 (보기 ▾에서도 켜고 꺼요)")),
       row("실적 발표일 표시", toggle(() => c.show_earn ?? true, set("show_earn")), note("차트 아래에 주황색 실적 표시 + 범례에 다음 실적일")),
+      // 0.30.0 (사용자 요청 2026-11-25: 거슬리면 바로 끌 수 있게)
+      row("국내 종목 선물 원화", toggle(() => c.krw_tag ?? true, set("krw_tag")), note("하이닉스·삼성·현대차·네이버 선물(바이낸스·OKX·하이퍼리퀴드) 차트에 주황 원화 딱지(현재가 × 원달러)와 국장 종가 점선")),
       row("주요 지표 알림", toggle(() => c.show_events ?? true, set("show_events")), note("FOMC·CPI·고용 같은 미국 주요 지표 발표 30분 전에 알려 줘요")),
     ];
   }

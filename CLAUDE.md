@@ -79,6 +79,14 @@ Tauri 2 Windows app for paper trading on replayed charts. It is a clone of `POWE
   - `mapHtf` takes an exact `endOf` for 1M/1Y (`htfOpt`); with a 30-day span, a 31-day month counted as done a day early in replay, which is a lookahead.
   - Alt+9 = 1M, Alt+0 = 1Y (`TIMEFRAMES` order; picker digits follow). Sentiment symbols keep only 1D/1W.
   - `pvwap` is a separate indicator from the intraday-only `vwap`: week/month/year VWAP lines that reset per period (`C.vwap` with a `periodOf` key, `paintSessionLine` got an optional key). A line is skipped when its period is not longer than the chart timeframe.
+- 0.30.0 (released 2026-11-25): KRW tag for Korean stock perps.
+  - `core/krw.js` (pure, tested): `krxOf` maps 11 perps to 000660/005930/005380/035420.KS. The SK hynix ADR (`SKHYUSDT`, `xyz:SKHY`) and 2x products are left out. NAVER has no Hyperliquid market.
+  - Checked 2026-11-24 at the KRX close: perp price = KRX price ÷ USD/KRW within 0.3%. So KRW = perp × FX, rounded to the KRX tick (`krwText`, always comma-separated: the user insisted).
+  - `cell.js` `syncKrw`/`paintKrw`: two `AxisTag` primitives on `main`. The orange tag at the last close sits 0.5 px lower, so label alignment stacks it right under the last-value tag. The dark close tag ("국장 종가") sits at the dashed price line.
+  - A hidden series' last-value label did not work: price-axis labels use the scale's formatter, whose source is the lowest z-order series (main), so it printed dollars. Price-line `title` only shows with `axisLabelVisible`, so the pane text is drawn by `AxisTag.draw`.
+  - FX: live = `estimator.fx()` (Yahoo `KRW=X` quote, else `xyz:KRW`, subscribed for KR perps). Replay and windowed views use the previous finished `KRW=X` daily bar (`lastBefore`), and the close is the last KRX daily bar whose 15:30 KST has passed. Refs reload every 10 minutes.
+  - Off switch: `cfg.chart.krw_tag` (default on). The tag is hidden on `%` scales.
+  - KRW-currency symbols (KR stocks, KR indices, `KRW=X`) now get a comma formatter on the price scale (`priceFormatFor`).
 - 0.29.0:
   - 3m timeframe. `TF_SEC` puts it after 1m, so it sits in toolbar order.
     - Alt+digit uses `ALT_TFS` (TIMEFRAMES without 3m), so the user's shortcuts did not shift. 3m has no Alt key.
@@ -118,7 +126,7 @@ Tauri 2 Windows app for paper trading on replayed charts. It is a clone of `POWE
 
 ## Working rules
 - **Explain first, fix when told** (the user's rule, 2026-11-01): for a problem report or a "확인해 봐", explain the cause, the planned fix and its side effects in plain Korean, and wait. "고쳐줘", "만들어" or "넣어" means go ahead. Fills must match real exchanges as closely as possible ("실제와 같은 게 중요해"). State any difference before changing replay, fills or liquidation.
-- `web/` is plain ES modules with no bundler. Dev server: `python tools/devserver.py 5280`. Tests: http://localhost:5280/tests/test.html — all must pass (227 on 2026-11-24). They also import every module, which catches syntax errors that would give the EXE a black screen. Add new modules to the `MODULES` list there.
+- `web/` is plain ES modules with no bundler. Dev server: `python tools/devserver.py 5280`. Tests: http://localhost:5280/tests/test.html — all must pass (233 on 2026-11-25). They also import every module, which catches syntax errors that would give the EXE a black screen. Add new modules to the `MODULES` list there.
 - Versions: follow [CHANGELOG.md](CHANGELOG.md). Bump `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and the root package in `src-tauri/Cargo.lock`, add an entry. Patch for fixes, minor for features.
 - **Source lives in a public GitHub repo (since 2026-11-03, 0.15.0): https://github.com/rlagustn92/fake-trading-power-chart.** The user wants only the EXE and the `%APPDATA%` data on their PCs. This setup was copied from the original app (its 1.4.0), with only the names changed.
   - Release = version bump + CHANGELOG + push to `main`. Don't push tags by hand. [.github/workflows/build.yml](.github/workflows/build.yml) sees a version with no Release yet, builds the EXE on GitHub's Windows runner, then creates the tag `v<version>` and the Release with `FAKE-TRADING-POWER-CHART.exe`. Pushes that don't bump the version skip the build.

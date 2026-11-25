@@ -5,6 +5,7 @@
 //   배수:  QLD = 종가 × (1 + 2 × QQQ 무기한선물 변화율)
 // 저장하지 않는다(화면 표시만). 정규장이 열리면 숨긴다.
 import { describe } from "./symbols.js";
+import { krxOf } from "./krw.js";
 import * as db from "./db.js";
 import * as HL from "../sources/hyperliquid.js";
 import * as BN from "../sources/binance.js";
@@ -78,6 +79,7 @@ export function createEstimator({ cfg, data }) {
     if (!(cfg.perp?.enabled ?? true)) targets = new Set();
     for (const p of perps.values()) p.refs.clear();
     for (const id of targets) {
+      if (krxOf(id)) watchPerp(KRW, id); // 국내 종목 선물 차트의 원화 딱지도 지금 원달러가 필요하다 (0.30.0)
       const m = resolve(id);
       if (!m) continue;
       watchPerp(m, id);
@@ -205,5 +207,7 @@ export function createEstimator({ cfg, data }) {
       return () => bus.removeEventListener("estimate", h);
     },
     mappingOf: resolve,
+    /** 지금 원달러 (Yahoo KRW=X 현재가, 없으면 Hyperliquid xyz:KRW). 주말엔 마지막 값 그대로 */
+    fx: () => data.quote("KRW=X")?.price ?? perps.get(key(KRW))?.price ?? null,
   };
 }

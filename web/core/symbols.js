@@ -102,6 +102,8 @@ export const OKX_KO = {
   SAMSUNG: "삼성전자 (OKX 무기한선물)",
   SKHYNIX: "SK하이닉스 (OKX 무기한선물)",
   SKHY: "SK하이닉스 (OKX 무기한선물)",
+  HYUNDAI: "현대차 (OKX 무기한선물)",
+  NAVER: "네이버 (OKX 무기한선물)",
   EWY: "한국 주식 ETF (OKX 무기한선물)",
   CSOPSAMSUNG2L: "삼성전자 2배 (OKX 무기한선물)",
   CSOPSKHYNIX2L: "SK하이닉스 2배 (OKX 무기한선물)",

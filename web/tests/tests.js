@@ -955,10 +955,35 @@ section("OKX 무기한선물 (0.25.0)");
   check("과거 1분봉 받기: 바이낸스·OKX는 됨 · 하이퍼리퀴드는 안 됨", [canBackfill(d), canBackfill(describe("bn:BTCUSDT")), canBackfill(describe("hl:BTC"))].map(Number), [1, 1, 0]);
 }
 
+// ── 국내 종목 선물의 원화 딱지 (0.30.0) ──
+section("국내 종목 선물 원화 딱지");
+{
+  const K = await import("../core/krw.js");
+  // check는 숫자만 비교한다 → 글자는 "같으면 1"로
+  const same = (got, want) => got.map((x, i) => Number(x === want[i]));
+  const ids = ["bn:SKHYNIXUSDT", "ok:SKHYNIX-USDT-SWAP", "hl:xyz:SKHX", "hl:xyz:SMSN", "ok:HYUNDAI-USDT-SWAP", "bn:NAVERUSDT", "bn:SKHYUSDT", "hl:xyz:SKHY", "ok:CSOPSAMSUNG2L-USDT-SWAP", "bn:BTCUSDT", "005930.KS"];
+  const krx = ["000660.KS", "000660.KS", "000660.KS", "005930.KS", "005380.KS", "035420.KS", null, null, null, null, null];
+  check("원화 딱지 붙는 선물: 하이닉스·삼성·현대차·네이버 × 바이낸스·OKX·하이퍼리퀴드 (ADR·2배·코인은 아님)", same(ids.map(K.krxOf), krx), krx.map(() => 1));
+  check("국장 호가 단위 (1,000 · 500 · 100 · 50 · 10 · 5 · 1원)", [1096294, 266366, 179600, 45000, 15000, 3000, 1500].map(K.krxTick), [1000, 500, 100, 50, 10, 5, 1]);
+  const texts = ["1,096,000", "179,600", "266,500", "154,200", "", ""];
+  check("원화 글자: 호가 단위로 맞추고 세 자리마다 쉼표 (1,096,000 · 179,600 · 266,500 · 154,200)", same([K.krwText(816.85 * 1342.1), K.krwText(133.82 * 1342.1), K.krwText(198.47 * 1342.1), K.krwText(114.92 * 1342.1), K.krwText(0), K.krwText(null)], texts), texts.map(() => 1));
+  // 2026-11-24 15:29 실제 값: 하이닉스 선물 $864.16 × 1,344.2 ≈ 국장 종가 1,158,000 (0.3% 차이)
+  check("선물 × 원달러 ≈ 국장 종가 (어제 마감 확인값)", Math.abs((864.16 * 1344.2) / 1158000 - 1) < 0.005 ? 1 : 0, 1);
+  const day = Date.UTC(2026, 10, 24) / 1000; // 11/24(화) 국장 일봉
+  const days = [{ t: day - 86400, c: 1150000 }, { t: day, c: 1158000 }];
+  check(
+    "국장 종가: 15:30(06:30 UTC)이 지나야 그날 종가 · 그 전엔 전날 종가",
+    [K.lastBefore(days, day + 6.5 * 3600 - 1, K.KRX_CLOSE)?.c, K.lastBefore(days, day + 6.5 * 3600, K.KRX_CLOSE)?.c, K.lastBefore(days, day - 5 * 86400, K.KRX_CLOSE)],
+    [1150000, 1158000, null]
+  );
+  const fx = [{ t: day - 4 * 86400, c: 1340 }, { t: day, c: 1344.2 }]; // 11/20(금), 11/24(화)
+  check("리플레이 환율: 그날이 끝나야 그날 환율 (미래를 안 본다) · 주말 지나 월요일엔 금요일 값", [K.lastBefore(fx, day + 12 * 3600, 86400)?.c, K.lastBefore(fx, day + 86400, 86400)?.c, K.lastBefore(fx, day - 12 * 3600, 86400)?.c], [1340, 1344.2, 1340]);
+}
+
 // ── 모든 화면 파일이 문법 오류 없이 읽히는지 (하나라도 깨지면 EXE가 검은 화면에서 멈춘다) ──
 section("파일 읽기 (문법 오류 없는지)");
 {
-  const MODULES = ["alerts/engine", "backtest/engine", "backtest/view", "config", "core/bars", "core/colors", "core/csv", "core/events", "core/daily", "core/data", "core/db", "core/estimate", "core/intraday", "core/limit", "core/series", "core/session", "core/stocklist", "core/symbols", "core/tz", "drawings/geom", "drawings/layer", "drawings/store", "indicators/calc", "indicators/cloudboard", "indicators/explain", "indicators/guides", "indicators/index", "indicators/setups", "indicators/sentiment", "indicators/triangle", "platform", "sources/alpaca", "sources/binance", "sources/hyperliquid", "sources/okx", "sources/reconnect", "sources/sentiment", "sources/status", "sources/toss", "sources/yahoo", "trade/engine", "trade/history", "trade/journal", "trade/orderlines", "trade/panel", "ui/alerts", "ui/cell", "ui/dialog", "ui/dom", "ui/drawbar", "ui/format", "ui/goto", "ui/grid", "ui/indpanel", "ui/measure", "ui/menu", "ui/picker", "ui/primitives", "ui/replay", "ui/search", "ui/settings", "ui/sidebar", "ui/snapshot", "ui/statusbar", "ui/tip", "ui/toolbar", "ui/update", "ui/welcome"];
+  const MODULES = ["alerts/engine", "backtest/engine", "backtest/view", "config", "core/bars", "core/colors", "core/csv", "core/events", "core/daily", "core/data", "core/db", "core/estimate", "core/intraday", "core/krw", "core/limit", "core/series", "core/session", "core/stocklist", "core/symbols", "core/tz", "drawings/geom", "drawings/layer", "drawings/store", "indicators/calc", "indicators/cloudboard", "indicators/explain", "indicators/guides", "indicators/index", "indicators/setups", "indicators/sentiment", "indicators/triangle", "platform", "sources/alpaca", "sources/binance", "sources/hyperliquid", "sources/okx", "sources/reconnect", "sources/sentiment", "sources/status", "sources/toss", "sources/yahoo", "trade/engine", "trade/history", "trade/journal", "trade/orderlines", "trade/panel", "ui/alerts", "ui/cell", "ui/dialog", "ui/dom", "ui/drawbar", "ui/format", "ui/goto", "ui/grid", "ui/indpanel", "ui/measure", "ui/menu", "ui/picker", "ui/primitives", "ui/replay", "ui/search", "ui/settings", "ui/sidebar", "ui/snapshot", "ui/statusbar", "ui/tip", "ui/toolbar", "ui/update", "ui/welcome"];
   const broken = [];
   for (const m of MODULES) {
     try {

@@ -11,7 +11,7 @@ import { TF_NAME } from "../core/data.js";
 import { INDICATORS, withDefaults } from "../indicators/index.js";
 import { SENTIMENT, stageOf, sentimentTip } from "../indicators/sentiment.js";
 import { sma } from "../indicators/calc.js";
-import { Bands } from "./primitives.js";
+import { Bands, AxisTag } from "./primitives.js";
 import { createMeasure } from "./measure.js";
 import { createDrawings } from "../drawings/layer.js";
 import { createMapper } from "../drawings/geom.js";
@@ -20,6 +20,7 @@ import { h } from "./dom.js";
 import { num, signed, dir, decimalsFor, compact, chartTime, setText, setClass } from "./format.js";
 import { logInfo } from "../platform.js";
 import { upColor, downColor } from "../core/colors.js";
+import { krxOf, krwText, lastBefore, KRX_CLOSE } from "../core/krw.js";
 
 const FIRST_LIMIT = 4000; // 분봉 처음 읽는 봉 수 (지표가 왼쪽 끝에서 끊기지 않게 넉넉히)
 const MORE_LIMIT = 4000;
@@ -140,9 +141,11 @@ export function createCell(env, cc) {
   let main = null;
   let markersApi = null;
   let estLine = null; // 24시간 추정가 점선
+  let krw = null; // 국내 종목 선물의 원화 딱지 (0.30.0, syncKrw) {krx, tag, line, days, fxDays, at, loading, fx}
   const bands = new Bands(); // 세션 구분선·장 밖 시간 배경
 
   function createMain() {
+    dropKrw(); // 원화 딱지 시리즈는 늘 주 시리즈 뒤에 다시 만든다 (syncKrw 설명)
     if (main) {
       main.detachPrimitive(bands);
       main.detachPrimitive(drawings.prim);
@@ -288,7 +291,13 @@ export function createCell(env, cc) {
     const last = bars[bars.length - 1]?.c;
     decimals = decimalsFor(info, last);
     if (info.yieldLike) main.applyOptions({ priceFormat: { type: "custom", formatter: (v) => `${v.toFixed(3)}%`, minMove: 0.001 } });
-    else main.applyOptions({ priceFormat: { type: "price", precision: decimals, minMove: 1 / 10 ** decimals } });
+    else main.applyOptions({ priceFormat: priceFormatFor(info, decimals) });
+  }
+  /** 눈금 숫자 모양: 원화 종목(국내 주식·코스피·원달러)은 세 자리마다 쉼표 — 머리줄·범례와 같게
+   *  (0.30.0, 사용자 요청: 국장 차트 눈금이 "1084000"이라 바로 안 읽힌다. 라이브러리 기본 "price"는 쉼표가 없다) */
+  function priceFormatFor(i, d) {
+    if (i.currency === "KRW") return { type: "custom", minMove: 1 / 10 ** d, formatter: (v) => num(v, d) };
+    return { type: "price", precision: d, minMove: 1 / 10 ** d };
   }
 
   // ── 비교 겹쳐 보기 (SPEC §3.1 비교＋): 다른 종목을 같은 % 눈금에 선으로. 이 칸 봉 시각에 맞춰서(밤 시간 칸이 끼지 않게) ──
@@ -363,7 +372,7 @@ export function createCell(env, cc) {
       const last = c.raw[c.raw.length - 1]?.c;
       if (last != null) {
         c.decimals = decimalsFor(c.info, last);
-        c.series.applyOptions({ priceFormat: { type: "price", precision: c.decimals, minMove: 1 / 10 ** c.decimals } });
+        c.series.applyOptions({ priceFormat: priceFormatFor(c.info, c.decimals) });
       }
     }
     scheduleAlign();
@@ -751,6 +760,7 @@ export function createCell(env, cc) {
     gaps = tf === "1D" && info.kind !== "sentiment" && info.kind !== "perp" ? dataGaps(bars) : null;
     applyPriceFormat();
     main.setData(toMain(bars));
+    syncKrw();
     drawings.refresh();
     splitMarkers();
     eventMarkers();
@@ -808,6 +818,7 @@ export function createCell(env, cc) {
     } catch {
       return setBars(next, "follow");
     }
+    syncKrw();
     renderIndicators(from);
     drawings.refresh();
     if (next.length !== n0) paintSessions();
@@ -1030,6 +1041,95 @@ export function createCell(env, cc) {
   }
   const offEst = env.estimator?.on(({ id }) => id === info.id && paintEstimate());
 
+  // ── 국내 종목 선물의 원화 딱지 (0.30.0, 사용자 요청 2026-11-25) ──
+  // 하이닉스·삼성·현대차·네이버 선물(바이낸스·OKX·하이퍼리퀴드)에만: 파란 현재가 딱지 바로 밑에 주황 원화 딱지("1,096,000")
+  // + 국장 종가 주황 점선. 화면 표시만 (저장·모의매매 체결·지표와 상관없음). 원화 = 선물 가격 × 원달러 (core/krw.js)
+  // 딱지 = 주 시리즈에 붙인 AxisTag (primitives.js), 마지막 봉 종가 높이 (하이킨아시여도 실제 종가).
+  //   처음엔 안 보이는 선 시리즈의 이름표로 했는데 이름표 글자가 눈금의 달러 모양을 따라가서 원화를 못 썼다 (2026-11-25 화면 확인)
+  const krwWanted = () => ((cfg.chart.krw_tag ?? true) && bars.length && scaleMode() !== "pct" ? krxOf(info.id) : null);
+  /** 보고 있는 시각 (초): 실시간이면 null → 지금 환율 */
+  const krwTime = () => (replay ? replay.endT : windowed && bars.length ? bars[bars.length - 1].t + (TF_SEC[tf] ?? DAY) : null);
+
+  function dropKrw() {
+    if (!krw) return;
+    for (const t of [krw.tag, krw.closeTag]) {
+      try {
+        main?.detachPrimitive(t);
+      } catch {} // 주 시리즈를 새로 만들었으면 이미 없다
+    }
+    try {
+      if (krw.line) main?.removePriceLine(krw.line);
+    } catch {}
+    krw = null;
+  }
+
+  /** 봉이 바뀔 때마다: 원화 딱지를 마지막 봉 종가에 맞추기 */
+  function syncKrw() {
+    const krx = krwWanted();
+    if (krw && krw.krx !== krx) dropKrw();
+    if (!krx) return;
+    if (!krw) {
+      krw = { krx, tag: new AxisTag(), closeTag: new AxisTag(), line: null, days: [], fxDays: [], at: 0, loading: false, fx: null };
+      main.attachPrimitive(krw.tag);
+      main.attachPrimitive(krw.closeTag);
+      loadKrwRefs();
+    }
+    paintKrw();
+  }
+
+  /** 원달러(실시간 = 지금 · 리플레이·지난 구간 = 그 전날, 미래를 안 본다)를 다시 보고 딱지·국장 종가선 그리기 */
+  function paintKrw() {
+    const k = krw;
+    if (!k) return;
+    const T = krwTime();
+    const fx = T == null ? env.estimator?.fx?.() ?? k.fxDays[k.fxDays.length - 1]?.c ?? null : lastBefore(k.fxDays, T, DAY)?.c ?? null;
+    k.fx = fx;
+    const last = bars[bars.length - 1]?.c;
+    k.tag.set(last ?? null, fx && last ? krwText(last * fx) : "");
+    // 국장 종가선: 마지막 국장 종가를 지금 환율로 달러로 바꾼 높이 → 현재가가 선 위면 국장 종가보다 오른 것.
+    // 눈금 끝에는 그 원화 종가(어두운 바탕 주황 글자 — 지금 원화 딱지(주황 바탕)와 구별), 선 위 오른쪽 끝에 "국장 종가"
+    const close = lastBefore(k.days, T ?? Date.now() / 1000, KRX_CLOSE)?.c;
+    const price = close && fx ? close / fx : null;
+    k.closeTag.set(price, price ? krwText(close) : "", { back: "#1b2028", fore: "#ffb020", pane: "국장 종가" });
+    if (!price) {
+      if (k.line) main.removePriceLine(k.line);
+      k.line = null;
+    } else {
+      const o = { price, color: "#ffb020", lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: "" };
+      if (k.line) k.line.applyOptions(o);
+      else k.line = main.createPriceLine(o);
+    }
+    if (T == null && Date.now() - k.at > 10 * 60e3) loadKrwRefs(); // 실시간: 10분마다 국장 종가·환율 새로
+  }
+
+  /** 국장 일봉·원달러 일봉: 저장된 것으로 먼저 그리고, 받아서(10분에 한 번) 다시 */
+  async function loadKrwRefs() {
+    const k = krw;
+    if (!k || k.loading) return;
+    k.loading = true;
+    k.at = Date.now();
+    const ki = describe(k.krx);
+    const fi = describe("KRW=X");
+    const read = async () => {
+      const [a, b] = await Promise.all([loadSeries(ki, "1D", { basis: "raw" }), loadSeries(fi, "1D")]);
+      if (krw !== k) return false;
+      k.days = a.bars;
+      k.fxDays = b.bars;
+      paintKrw();
+      return true;
+    };
+    try {
+      if (await read()) {
+        await Promise.all([data.ensure(ki, "1D").catch(() => {}), data.ensure(fi, "1D").catch(() => {})]);
+        await read();
+      }
+    } catch (e) {
+      console.warn("[krw]", k.krx, e);
+    } finally {
+      k.loading = false;
+    }
+  }
+
   function paintHead() {
     if (!cc.symbol) {
       setText(nameEl, "빈 칸");
@@ -1220,6 +1320,7 @@ export function createCell(env, cc) {
     } else {
       bars = [];
       main.setData([]);
+      dropKrw();
       renderIndicators(0);
       showMsg(isDailyTf(tf) || info.intraday !== "alpaca" || env.hasAlpaca() ? `처음 받는 중… (${info.label} ${TF_NAME[tf]}봉)` : "미국 주식 분봉은 알파카 키가 있어야 받을 수 있어요\n⚙ 설정 → 데이터에서 키를 넣어 주세요");
       paintLegend();
@@ -1541,6 +1642,7 @@ export function createCell(env, cc) {
       // 0.16.0: 전에는 "최소 1개"를 보여 주느라 그 뒤의 첫 봉(미래)이 보였다 (8/17 리플레이에 삼성전자 8/26 09:00 봉)
       bars = [];
       main.setData([]);
+      dropKrw();
       renderIndicators(0);
       showMsg(`리플레이 시각에는 ${info.label} ${TF_NAME[tf]}봉 자료가 없어요\n자료가 있는 때에 닿으면 나타나요`);
       paintLegend();
@@ -1726,6 +1828,7 @@ export function createCell(env, cc) {
       cc.compare = [...new Set(list.filter(Boolean))].slice(0, 3);
       env.onChange?.();
       applyScale();
+      syncKrw(); // % 눈금이 되면 원화 딱지는 뺀다
       syncCompare(true);
       paintLegend();
     },
@@ -1734,6 +1837,7 @@ export function createCell(env, cc) {
       cc.compare_mode = mode;
       env.onChange?.();
       applyScale();
+      syncKrw();
       syncCompare(true);
       paintLegend();
     },
@@ -1779,6 +1883,7 @@ export function createCell(env, cc) {
       env.onChange?.();
       if ("scale" in patch) {
         applyScale();
+        syncKrw();
         // 0.28.0: 로그 눈금에 따라 값이 달라지는 지표(자동 피보·자동 삼각수렴)는 바로 다시 계산
         for (const hd of handles) if (hd.scaleAware) try { hd.render(bars, 0); } catch {}
         paintLegend();
