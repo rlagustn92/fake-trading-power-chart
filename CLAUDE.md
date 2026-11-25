@@ -99,7 +99,7 @@ Tauri 2 Windows app for paper trading on replayed charts. It is a clone of `POWE
     - 0.29.1 replaced the 0.29.0 "3-bar 관찰" rule.
 - 0.28.0 (0.27.0 folded in, released together):
   - 나뇨띠 지표 (`nanyotti` in guides.js, pure math in `indicators/cloudboard.js`): a 9-row Ichimoku status table (our estimate).
-    - **Its background lives only on the user's PCs in `private/` (gitignored). Read `private/README.md` before working on it.** Never write that background into public files (docs, code comments, test names, in-app text, Release notes). The user decided this on 2026-11-25.
+    - **Describe it in public files by its calculation only.** Write no story of where the rules came from in docs, code comments, test names, in-app text or Release notes. The user decided this on 2026-11-25. The user works on it from several PCs, so everything needed to work on it must be in the repo as calculation rules.
     - The indicator name is the user's choice. This is an exception to the "method name, instructor only in the description" rule.
     - Rows: Ichimoku 9/26/52 displaced 26, last closed bar, ATR 14, `C.rvol` 20, ATR/SMA(ATR,50), 1H/4H via `mapHtf`.
     - Row 5 (2·4·6·8) is a round-number state machine (`ladderAt`). Rows 3 and 7 are guesses.
