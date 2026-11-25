@@ -282,7 +282,7 @@ check("XIRR: 1년 뒤 10% → 10%", xirr([[0, -1000], [365 * day, 1100]]), 0.1, 
       }
       if (bad.length) console.warn("[시험] 매매 방식 지표", bad);
       check(`매매 방식 지표 9개: 5분봉·일봉에서 오류 없이 그려지고 범례가 나온다${bad.length ? ` — ${bad.join(" / ")}` : ""}`, bad.length, 0);
-      check("매매 방식 지표 11개 (0.28.0 나뇨띠 지표 포함): 설명서(쓰는 봉·보는 법)가 있고 지표 창 맨 위에 나온다", [GUIDE_ORDER.length, GUIDE_ORDER.filter((id) => EXPLAIN[id]?.one && /\[/.test(EXPLAIN[id].read)).length, yes(ORDER.slice(0, GUIDE_ORDER.length).join() === GUIDE_ORDER.join())], [11, 11, 1]);
+      check("매매 방식 지표 12개 (0.28.0 나뇨띠 지표 · 0.32.0 고점·저점 % 포함): 설명서(쓰는 봉·보는 법)가 있고 지표 창 맨 위에 나온다", [GUIDE_ORDER.length, GUIDE_ORDER.filter((id) => EXPLAIN[id]?.one && /\[/.test(EXPLAIN[id].read)).length, yes(ORDER.slice(0, GUIDE_ORDER.length).join() === GUIDE_ORDER.join())], [12, 12, 1]);
       // 0.22.0 딱지: 신호를 내는 지표는 범례가 '롱 후보·숏 후보·쉼' 한 줄로 시작하고, 기본은 그 한 줄뿐 (자세한 글자는 설정에서)
       const SIG = ["regime", "sixma", "pull20", "setup50", "pistol", "lshape", "vwapswing", "barread"];
       const badgeOf = (id, detail) => {
@@ -318,6 +318,14 @@ check("XIRR: 1년 뒤 10% → 10%", xirr([[0, -1000], [365 * day, 1100]]), 0.1, 
       const af2 = S.autoFib(S.flipBars(fb), 120);
       check("자동 피보: 내린 움직임이면 저점에서 위로 잰다", [yes(af2.up), af2.price(0), af2.price(1)], [0, -16, -8]);
       check("자동 피보: 그 봉까지만 본다 (뒤에 더 높은 고점이 있어도 안 씀)", S.autoFib(fb, 120, 3).H, 13);
+      // 0.32.0 고점·저점 %: 5분봉, 범위 25분(봉 5개). 종가 130·100·110·105·98·92·95, 고가 = 종가+1, 저가 = 종가−1
+      const pb = [130, 100, 110, 105, 98, 92, 95].map((c, k) => ({ t: k * 300, o: c, h: c + 1, l: c - 1, c }));
+      const ph = S.pctFrom(pb, { range: 1500, span: 300 });
+      check("고점·저점 %: 범위(25분 = 봉 5개) 안 고점 111 기준 · 지금 95 = −14.41% · 범위 밖 131은 안 씀 · 선 −5·−10·−15·−20 · −10% 선 = 111 × 0.90 = 99.9", [ph.idx, ph.from, ph.price, ph.n, ph.pct, ph.levels.length, ph.levels[1].price, yes(ph.short)], [2, 2, 111, 5, -14.41, 4, 99.9, 0], 0.01);
+      const pl = S.pctFrom(pb, { range: 1500, span: 300, base: "lo", step: 5 });
+      check("고점·저점 % 저점 기준: 저점 91 · 지금 +4.40% · 선은 범위 안 고점 111(+22%) 너머 한 칸 +25%까지 · +5% 선 = 95.55", [pl.idx, pl.price, pl.pct, pl.levels.length, pl.levels[0].price], [5, 91, 4.4, 5, 95.55], 0.01);
+      const pe = S.pctFrom(pb, { end: 3, range: 1500, span: 300 });
+      check("고점·저점 %: 그 봉까지만 본다 · 받은 봉이 범위보다 짧으면 short", [pe.idx, pe.price, pe.n, yes(pe.short)], [0, 131, 4, 1]);
       // 0.28.0 로그 피보 (양봉업자 강의 SOXX: 49.44 → 218.65를 로그로 나누면 0.5 = 103.97, 1.272 = 327.62, 2 = 966.99)
       const sx = [60, 49.44 + 1, 80, 120, 218.65 - 1, 200].map((c, k) => ({ t: k * 86400, o: c, h: c + 1, l: c - 1, c }));
       const lf = S.autoFib(sx, 120, sx.length - 1, true);

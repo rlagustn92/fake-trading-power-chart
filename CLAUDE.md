@@ -143,6 +143,15 @@ Tauri 2 Windows app for paper trading on replayed charts. It is a clone of `POWE
     - Alerts reset `lastSide` for that symbol on `filled`.
     - Live paper trading only reads bars at or after its last snapshot, so inserted past bars do not fill anything. Checked on the dev server while 📡 was running.
     - The 💰 panel only warns (`.tr-hole`) and never blocks orders.
+- 0.32.0 `hlpct` "고점·저점 %" (the user: how much it has dropped at a glance, in 5% steps, over 24 hours on any timeframe):
+  - `S.pctFrom` is pure and tested. The range is clock time (`PCT_RANGES` in guides.js, 24h by default), counted back from the end of the bar, so every timeframe uses the same high.
+  - Every % is measured from one base point: the −10% line is base × 0.90.
+  - The base (high or low) changes only in settings, never by itself. Up and down % differ (100 → 75 is −25%, 75 → 100 is +33%); the user asked about this.
+  - Legend: one badge plus the base price. The high uses `badge: "short"` (down color), the low uses `"long"`.
+  - Line labels show % only. The user said adding % to auto fib showed too many numbers and asked for a separate indicator.
+  - Lines start at the first bar of the range, and the two lines around the price are bright.
+  - With fewer than 3 bars in the range (1D with 24h), the indicator shows only a hint.
+  - `Levels` do not join autoscale, so the base line can be off-screen.
 - 0.19.1 ruler right-click (the user chose the plain rule): `measure.js` handles `contextmenu` in the capture phase on the cell body. While measuring (`dragging` or `waitingB`) it clears, otherwise with the ruler on it turns the ruler off (the result stays), and with the ruler off it passes through to the copy menu. `drawings/layer.js` returns early from its `contextmenu` while `measureOn()`, so a drawn line under the pointer doesn't take the click.
 - Old versions for downgrades: from 0.15.0, GitHub Releases keeps every version's EXE, so don't make versioned copies in `release\` any more (the user decided this on 2026-11-03). The older copies (`release\FAKE TRADING POWER CHART <ver>.exe`, 0.12.1 to 0.14.1) stay because they aren't on GitHub. The desktop shortcut points to the unversioned latest EXE.
 - Hooks added to original files are small and commented: `ui/cell.js` (1-minute replay stepping with partial bars, keep replay across timeframe changes, `onMain`/`onReplayStart` hooks, `setTradeMarkers`), `ui/replay.js` (🎲 random start, `onBegin`/`onStep`/`onStop`), `main.js`, `ui/toolbar.js`, `index.html`, `styles.css`.
@@ -160,7 +169,7 @@ Tauri 2 Windows app for paper trading on replayed charts. It is a clone of `POWE
 
 ## Working rules
 - **Explain first, fix when told** (the user's rule, 2026-11-01): for a problem report or a "확인해 봐", explain the cause, the planned fix and its side effects in plain Korean, and wait. "고쳐줘", "만들어" or "넣어" means go ahead. Fills must match real exchanges as closely as possible ("실제와 같은 게 중요해"). State any difference before changing replay, fills or liquidation.
-- `web/` is plain ES modules with no bundler. Dev server: `python tools/devserver.py 5280`. Tests: http://localhost:5280/tests/test.html — all must pass (243 on 2026-11-25). They also import every module, which catches syntax errors that would give the EXE a black screen. Add new modules to the `MODULES` list there.
+- `web/` is plain ES modules with no bundler. Dev server: `python tools/devserver.py 5280`. Tests: http://localhost:5280/tests/test.html — all must pass (246 on 2026-11-25). They also import every module, which catches syntax errors that would give the EXE a black screen. Add new modules to the `MODULES` list there.
 - Versions: follow [CHANGELOG.md](CHANGELOG.md). Bump `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and the root package in `src-tauri/Cargo.lock`, add an entry. Patch for fixes, minor for features.
 - **Source lives in a public GitHub repo (since 2026-11-03, 0.15.0): https://github.com/rlagustn92/fake-trading-power-chart.** The user wants only the EXE and the `%APPDATA%` data on their PCs. This setup was copied from the original app (its 1.4.0), with only the names changed.
   - Release = version bump + CHANGELOG + push to `main`. Don't push tags by hand. [.github/workflows/build.yml](.github/workflows/build.yml) sees a version with no Release yet, builds the EXE on GitHub's Windows runner, then creates the tag `v<version>` and the Release with `FAKE-TRADING-POWER-CHART.exe`. Pushes that don't bump the version skip the build.

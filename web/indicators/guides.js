@@ -20,6 +20,14 @@ const sgn = (v, d = 2) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(d)}%`;
 const money = (v) => (v == null ? "—" : Math.abs(v) >= 100 ? Math.round(v).toLocaleString() : v.toLocaleString(undefined, { maximumFractionDigits: 2 }));
 const qtyText = (q) => (q == null ? "—" : q >= 100 ? Math.round(q).toLocaleString() : q.toLocaleString(undefined, { maximumFractionDigits: 4 }));
 const lastOf = (a) => a[a.length - 1];
+// 고점·저점 % (0.32.0): 범위 = [값, 이름, 초]. 봉 수가 아니라 시간이라 시간봉이 달라도 같은 고점을 쓴다
+const PCT_RANGES = [["24h", "24시간", 86400], ["12h", "12시간", 43200], ["3d", "3일", 3 * 86400], ["1w", "1주", 7 * 86400], ["1mo", "1달", 30 * 86400], ["1y", "1년", 365 * 86400]];
+const PCT_MIN_BARS = 3; // 범위 안 봉이 이보다 적으면 (일봉의 24시간 = 1봉) 선을 안 긋고 안내만
+/** −7.3% · +2.5% · 0% (끝의 0은 뺀다: −5.0 → −5%). d = 소수 자리 */
+const pctText = (v, d = 1) => {
+  const r = Number(Math.abs(v).toFixed(d));
+  return `${r === 0 ? "" : v < 0 ? "−" : "+"}${r}%`;
+};
 
 /** 최근 LIM봉만 잘라 주기: {off, bars, arrs} — 찾은 봉 번호에는 off를 다시 더한다 (shift) */
 function win(bars, ...arrs) {
@@ -380,6 +388,56 @@ export function guideIndicators(T) {
               { label: `자동 피보 · ${f.up ? "오른" : "내린"} 움직임${f.log ? " · 로그" : ""}`, value: `${ctx.fmt(f.up ? f.L : f.H)} → ${ctx.fmt(f.up ? f.H : f.L)}`, color: f.up ? upColor() : downColor() },
               { label: "지금", value: back == null ? "—" : back < 0 ? "움직임을 넘어섰어요" : back > 1 ? "전부 되돌렸어요 (움직임 무효)" : `${two(back)} 되돌림`, color: "#c9ced6" },
             ];
+          },
+        };
+      },
+    },
+
+    // ── 고점·저점 % (0.32.0, 사용자: "지금 얼마나 뺐는지 한눈에 · 5% 단위로 · 24시간어치를 내가 보는 시간봉에 알아서") ──
+    // 최근 '범위'(시간) 안의 고점(또는 저점)에서 지금 몇 %인지 딱지 하나 + 기준에서 간격%마다 선. 선 글자는 %만 (숫자를 줄여 달라고 해서).
+    // %는 늘 기준 한 점에서 잰다 (S.pctFrom). 기준은 설정에서만 바뀐다 — 저절로 바뀌면 같은 가격에서 숫자가 갑자기 달라진다. 신호는 안 낸다
+    hlpct: {
+      short: "고점·저점 %",
+      pane: "price",
+      noColor: true,
+      params: [
+        { key: "base", label: "기준", def: "hi", type: "select", options: [["hi", "고점 (얼마나 뺐나)"], ["lo", "저점 (얼마나 올렸나)"]], tip: "고점: 범위 안 가장 높은 곳에서 지금 몇 % 내려왔나 (선은 −5% · −10% …)\n저점: 범위 안 가장 낮은 곳에서 지금 몇 % 올라왔나 (선은 +5% · +10% …)\n같은 움직임도 기준에 따라 숫자가 달라요: 100 → 75는 −25%, 75 → 100은 +33%" },
+        { key: "range", label: "범위", def: "24h", type: "select", options: PCT_RANGES.map(([k, l]) => [k, l]), tip: "봉 개수가 아니라 시간이에요. 보고 있는 시간봉에 맞춰 봉 수가 저절로 바뀌어요\n24시간 = 1분봉 1,440봉 · 5분봉 288봉 · 15분봉 96봉 · 1시간봉 24봉 · 4시간봉 6봉\n일봉 이상에서는 1달·1년을 고르세요" },
+        { key: "step", label: "간격", def: "5", type: "select", options: [["1", "1%"], ["2.5", "2.5%"], ["5", "5%"], ["10", "10%"]], tip: "기준에서 이만큼마다 선을 그어요. 지금 가격 바로 위아래 두 선은 밝게 보여요" },
+      ],
+      color: "#f5c542",
+      make(ctx, inst) {
+        const p = inst.params;
+        const lv = new Levels();
+        ctx.attach(lv);
+        const hiB = () => p.base !== "lo";
+        const rangeKo = () => (PCT_RANGES.find(([k]) => k === p.range) ?? PCT_RANGES[0])[1];
+        const opt = (end) => ({ end, range: (PCT_RANGES.find(([k]) => k === p.range) ?? PCT_RANGES[0])[2], span: TF_SEC[ctx.tf] ?? 60, base: hiB() ? "hi" : "lo", step: Number(p.step) || 5 });
+        let last = [];
+        return {
+          series: [],
+          prims: [lv],
+          render(bars) {
+            last = bars;
+            const r = bars.length ? S.pctFrom(bars, opt(bars.length - 1)) : null;
+            if (!r || r.n < PCT_MIN_BARS) return lv.setData([]);
+            const w = inst.width ?? 1;
+            const at = Math.abs(r.pct) / r.step; // 지금 가격이 몇 번째 칸에 있나 → 그 칸의 위아래 선을 밝게
+            // 선은 범위의 첫 봉(24시간 전)부터: 범위가 눈에 보이고, 기준이 맨 끝 봉이어도 선이 짧아지지 않는다
+            const segs = [{ from: r.from, to: null, price: r.price, color: "#f5c542", width: w + 1, label: `${rangeKo()} ${hiB() ? "고점" : "저점"}` }];
+            for (const L of r.levels) {
+              const near = L.k === Math.floor(at) || L.k === Math.ceil(at);
+              segs.push({ from: r.from, to: null, price: L.price, color: near ? "#e8eaed" : MUTE, width: w, dash: true, label: pctText(L.pct, 1) });
+            }
+            lv.setData(segs);
+          },
+          legend(i) {
+            const name = "고점·저점 %";
+            const r = last[i] ? S.pctFrom(last, opt(i)) : null;
+            if (!r) return [{ label: name, value: "—", color: MUTE }];
+            if (r.n < PCT_MIN_BARS) return [{ label: name, value: `범위가 짧아요 (${rangeKo()} = 봉 ${r.n}개) · 설정에서 범위를 늘려 주세요`, color: MUTE }];
+            const hi = hiB();
+            return [{ badge: hi ? "short" : "long", label: `${hi ? "고점" : "저점"} ${pctText(r.pct, 1)}`, value: `${rangeKo()} ${hi ? "고점" : "저점"} ${ctx.fmt(r.price)}${r.short ? " · 받은 봉만" : ""}` }];
           },
         };
       },
@@ -1238,4 +1296,4 @@ export function guideIndicators(T) {
 }
 
 /** 지표 창 순서 (맨 위에 모아서 보여 준다) */
-export const GUIDE_ORDER = ["rplan", "regime", "sixma", "pull20", "setup50", "pistol", "lshape", "vwapswing", "barread", "autofib", "nanyotti"];
+export const GUIDE_ORDER = ["rplan", "regime", "sixma", "pull20", "setup50", "pistol", "lshape", "vwapswing", "barread", "autofib", "hlpct", "nanyotti"];

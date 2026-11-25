@@ -495,6 +495,46 @@ export function autoFib(bars, look = 120, end = bars.length - 1, log = false) {
   };
 }
 
+/**
+ * 고점·저점 % (0.32.0): end번 봉이 끝난 시각에서 range초 거슬러 간 동안의 가장 높은 고가(base "hi") 또는 가장 낮은 저가("lo")가 기준.
+ * 범위는 봉 수가 아니라 시간이라 시간봉이 달라도 같은 고점을 쓴다 (5분봉 24시간 = 288봉, 1시간봉 = 24봉). span = 봉 한 개의 초.
+ * 모든 %는 기준 한 점에서 잰다: −10% 선 = 기준 × 0.90 (5%씩 거듭 곱하지 않는다). 오른 %와 내린 %는 나누는 수가 달라 섞지 않는다.
+ * 선은 기준에서 step%마다, 범위 안 반대쪽 끝(또는 지금 종가) 너머 한 칸까지 (많아도 max개, 고점 기준은 −100% 전까지).
+ * end번 봉까지만 본다 (리플레이·마우스로 가리킨 봉). 같은 값이면 나중 봉이 기준.
+ * 돌려주는 것: {base, idx, from, price, pct, step, n, short, levels:[{k, pct, price}]} 또는 null
+ *   idx = 기준 봉, from = 범위의 첫 봉, n = 범위 안 봉 수, short = 받아 둔 봉이 범위보다 짧음 (맨 첫 봉이 범위 시작보다 뒤)
+ */
+export function pctFrom(bars, { end = bars.length - 1, range = 86400, span = 60, base = "hi", step = 5, max = 60 } = {}) {
+  const b = bars[end];
+  if (!b || !(step > 0)) return null;
+  const from = b.t + span - range;
+  const hiB = base !== "lo";
+  let idx = -1;
+  let far = null; // 반대쪽 끝 (고점 기준이면 가장 낮은 저가)
+  let n = 0;
+  let i = end;
+  for (; i >= 0 && bars[i].t >= from; i--) {
+    const x = bars[i];
+    n++;
+    if (idx < 0 || (hiB ? x.h > bars[idx].h : x.l < bars[idx].l)) idx = i;
+    const v = hiB ? x.l : x.h;
+    if (far == null || (hiB ? v < far : v > far)) far = v;
+  }
+  if (idx < 0) return null;
+  const price = hiB ? bars[idx].h : bars[idx].l;
+  if (!(price > 0)) return null;
+  const pct = (b.c / price - 1) * 100;
+  const reach = hiB ? (1 - Math.min(far, b.c) / price) * 100 : (Math.max(far, b.c) / price - 1) * 100;
+  const levels = [];
+  const kMax = Math.min(max, Math.floor(reach / step + 1e-9) + 1);
+  for (let k = 1; k <= kMax; k++) {
+    const pk = hiB ? -k * step : k * step;
+    if (pk <= -100) break;
+    levels.push({ k, pct: pk, price: price * (1 + pk / 100) });
+  }
+  return { base: hiB ? "hi" : "lo", idx, from: i + 1, price, pct, step, n, short: i < 0 && bars[0].t > from, levels };
+}
+
 export function rangeZone(bars, i, len = 40) {
   const s = Math.max(0, i - len);
   if (i - s < 5) return null;
