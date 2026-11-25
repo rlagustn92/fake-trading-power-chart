@@ -102,9 +102,23 @@ Tauri 2 Windows app for paper trading on replayed charts. It is a clone of `POWE
     - **Describe it in public files by its calculation only.** Write no story of where the rules came from in docs, code comments, test names, in-app text or Release notes. The user decided this on 2026-11-25. The user works on it from several PCs, so everything needed to work on it must be in the repo as calculation rules.
     - The indicator name is the user's choice. This is an exception to the "method name, instructor only in the description" rule.
     - Rows: Ichimoku 9/26/52 displaced 26, last closed bar, ATR 14, `C.rvol` 20, ATR/SMA(ATR,50), 1H/4H via `mapHtf`.
-    - Row 5 (2·4·6·8) is a round-number state machine (`ladderAt`). Rows 3 and 7 are guesses.
-    - Zones (rows 8–9) use our own rule: `boxZones` over `findZones` bases.
-    - The app has no 3m timeframe, so the ladder runs on 1m/5m with a 1-hour life.
+    - Row 7 (0.30.2): `alignText(h1, h4)` = "큰 방향 숏/롱 일치" when the 1H and 4H cloud positions agree (both above or both below). The chart bar's own trend is ignored.
+    - 0.30.2 rules, checked bar by bar on BTCUSDT 3m, 2026-11-25 05:00–16:21 KST (228 closed bars):
+      - Rows 8–9 zones (`zoneBoxes`, `liveZones`, `ZONE`). All 228 bars matched (count and nearest zone). Zones use 15m bars on charts below 15m.
+        - Boxes are a chain from the first bar. The first 5 bars set the high–low. The box grows while each next bar's high and low stay inside. The first bar outside ends the box, and the next box starts on the bar after it.
+        - A box counts if it has at least 6 bars, its first bar is within the last 200 bars, and closes after it have not gone both above and below it.
+        - Row 8 counts these boxes. Row 9 and the drawn boxes use only those whose last bar is at least 72 bars (18 h) old.
+        - Boxes are drawn over their own bars and do not extend to now.
+        - The look-back works anywhere from 176 to 220 bars; 200 was picked.
+      - Row 5 2·4·6·8 (`ladderAt`, 3m only).
+        - Matched: it is active when one of the last 10 bars has low < thousand ≤ high, using the latest such thousand; otherwise "1K 조건 대기". On or off matched on all bars.
+        - The band is 2-4 (thousand +200 to +400) when the close is at or above the thousand, otherwise 6-8 (−400 to −200). Touch = high ≥ +200, or low ≤ −200.
+        - Estimate: a touch after a bar that did not touch is "반응 발생", a touch after a touch is "구간 관찰", no touch is "구간 반응 대기". About 19 of 92 active bars differ.
+      - Row 3 fractal flow (`fractalAt`, `FRACTAL`).
+        - States: 조건 대기 → 상승/하락 후 횡보 → 반대 이탈 · 재검토 (exactly 6 bars, matched twice) or 재개 후보.
+        - The break is a close beyond the high–low of the 6 pause bars.
+        - Estimate: the pause starts when the 6-bar close range is ≤ 0.6 ATR after a close-to-close move of ≥ 2 ATR over the 10 bars before. The pause starts 1–2 bars before the observed table, and 4 of 229 bars differ.
+        - The "재개 후보" text was never observed.
   - The table is drawn by a new cell hook: a handle may return `panel(i)` → {title, sub, rows:[{label,value,color,bold,tip}], summary, foot}. `cell.js` `paintPanel` shows the first one at the top-right; clicking the title folds it (`cc.panel_fold`). Boxes come from `primitives.js` `Boxes`.
   - Fib drawing: `dw.log` is set at draw time from the chart's log scale. `dw.ext` (1.272/2 beyond the later point) follows `cfg.chart.fib_ext` and starts on. Labels read "0.5 (103.97)" (`fibPrice`, `fibLabel`).
   - Auto fib: `autoFib(bars, look, end, log)`, with `back(c)` and an `ext` param.
@@ -127,7 +141,7 @@ Tauri 2 Windows app for paper trading on replayed charts. It is a clone of `POWE
 
 ## Working rules
 - **Explain first, fix when told** (the user's rule, 2026-11-01): for a problem report or a "확인해 봐", explain the cause, the planned fix and its side effects in plain Korean, and wait. "고쳐줘", "만들어" or "넣어" means go ahead. Fills must match real exchanges as closely as possible ("실제와 같은 게 중요해"). State any difference before changing replay, fills or liquidation.
-- `web/` is plain ES modules with no bundler. Dev server: `python tools/devserver.py 5280`. Tests: http://localhost:5280/tests/test.html — all must pass (233 on 2026-11-25). They also import every module, which catches syntax errors that would give the EXE a black screen. Add new modules to the `MODULES` list there.
+- `web/` is plain ES modules with no bundler. Dev server: `python tools/devserver.py 5280`. Tests: http://localhost:5280/tests/test.html — all must pass (236 on 2026-11-25). They also import every module, which catches syntax errors that would give the EXE a black screen. Add new modules to the `MODULES` list there.
 - Versions: follow [CHANGELOG.md](CHANGELOG.md). Bump `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and the root package in `src-tauri/Cargo.lock`, add an entry. Patch for fixes, minor for features.
 - **Source lives in a public GitHub repo (since 2026-11-03, 0.15.0): https://github.com/rlagustn92/fake-trading-power-chart.** The user wants only the EXE and the `%APPDATA%` data on their PCs. This setup was copied from the original app (its 1.4.0), with only the names changed.
   - Release = version bump + CHANGELOG + push to `main`. Don't push tags by hand. [.github/workflows/build.yml](.github/workflows/build.yml) sees a version with no Release yet, builds the EXE on GitHub's Windows runner, then creates the tag `v<version>` and the Release with `FAKE-TRADING-POWER-CHART.exe`. Pushes that don't bump the version skip the build.

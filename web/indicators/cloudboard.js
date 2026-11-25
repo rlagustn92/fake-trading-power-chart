@@ -3,9 +3,7 @@
 //   구름 = 트레이딩뷰 기본 일목(9·26·52, 26칸 앞으로), 계산은 마지막으로 끝난 봉 기준("마감 기준"),
 //   구름 이격 = (종가 − 가까운 구름 끝) ÷ ATR(14), 큰 시간봉 = 1시간·4시간 구름 위·안·아래,
 //   시장 활동 = 거래량 ÷ 앞 20봉 평균, ATR(14) ÷ ATR 50봉 평균
-//   내가 정한 값(추정) — 이격 큼 기준 2, 2·4·6·8(비트코인 백 단위 칸), 프랙탈, 관찰 기준, 매물영역
-import * as C from "./calc.js";
-import { findZones } from "./setups.js";
+//   내가 정한 값(추정) — 이격 큼 기준 2, 2·4·6·8의 반응 나누기, 프랙탈의 쉼 찾기 (줄마다 확인된 것과 추정을 함수 설명에 적었다)
 
 export const ICHI = { conv: 9, base: 26, spanB: 52, disp: 26 };
 export const GAP_BIG = 2; // 이격 큼: 구름에서 ATR 이만큼 이상 (추정)
@@ -88,136 +86,156 @@ export const xText = (v) => (v == null ? "—" : `${v.toFixed(1)}x`);
 export const isBtcUsd = (id) => /BTC/i.test(id ?? "") && !/KRW|EUR|JPY|GBP/i.test(id ?? "");
 
 /**
- * 5번 줄 2·4·6·8 (추정, 비트코인 3분봉 전용): 종가가 천 단위(60,000 등)를 뚫으면 그 천 단위 옆 200달러 칸을 본다 (백 단위 숫자 그대로)
- *   아래로 뚫으면 59,800~60,000(8-1K, 바로 붙은 칸) · 59,600~59,800(6-8) · …, 위로 뚫으면 60,000~60,200(0-2, 붙은 칸) · 60,200~60,400(2-4) · …
- * 종가가 뚫은 천 단위 반대편으로 돌아오거나, 뚫은 지 LADDER_LIFE봉이 지나면 다시 "1K 조건 대기". 봉의 저가가 있는 칸으로 말한다.
- * 뚫은 뒤 보는 시간(20봉 = 1시간)은 내가 정한 값.
- * → {text, T(지금 보는 천 단위 또는 null), band(칸 아래 끝 숫자 0·2·4·6·8)}
+ * 5번 줄 2·4·6·8 (비트코인 3분봉 전용, 0.30.2).
+ * 켜짐: 지금 봉을 포함한 최근 LADDER_LIFE(10)봉 안에, 봉의 범위가 천 단위를 지나간 봉(저가 < 천 단위 ≤ 고가)이 있을 때.
+ *   없으면 "1K 조건 대기". 그런 봉이 여럿이면 가장 최근 봉의 천 단위(T)를 쓴다.
+ * 칸: 종가가 T 이상이면 위쪽 둘째 칸 2-4 (T+200 ~ T+400), 아래면 아래쪽 둘째 칸 6-8 (T−400 ~ T−200).
+ *   천 단위에 바로 붙은 칸(0-2 · 8-1K)은 안 본다.
+ * 닿음: 위쪽은 고가 ≥ T+200, 아래쪽은 저가 ≤ T−200.
+ *   이 봉이 닿고 앞 봉(같은 T)은 안 닿았으면 "반응 발생", 앞 봉도 닿았으면 "구간 관찰", 안 닿으면 "구간 반응 대기".
+ * 켜짐·꺼짐·칸 이름은 확인된 규칙, 반응 발생·구간 관찰·반응 대기를 나누는 법은 추정이에요.
+ * → {text, T(지금 보는 천 단위 또는 null), band(칸 아래 끝 숫자 2·6 또는 null)}
  */
-export const LADDER_LIFE = 20;
-/*
- * 0.29.0: 위로 뚫을 때도. 아래로 뚫으면 천 단위 아래 칸(8-1K가 바로 붙은 칸), 위로 뚫으면 위 칸(0-2가 붙은 칸), 둘 다 봉의 저가로 칸을 잰다.
- * 봉이 그 칸의 위 끝(다음 둥근 숫자)까지 닿으면 = 그 칸의 경계를 시험함 → 칸마다 처음이면 "반응 발생", 두 번째부터 "구간 관찰",
- * 닿지 않은 봉은 "구간 반응 대기" (예는 tests.js).
- */
-export function ladderAt(bars, k, look = 400, life = LADDER_LIFE) {
-  let T = null;
-  let dir = 0; // −1 아래로 뚫음 · 1 위로 뚫음
-  let since = -1;
-  let reacted = new Set();
-  let state = "wait"; // k번 봉: "react" · "obs" · "wait"
-  let cur = null; // k번 봉 저가가 있는 칸
-  for (let i = Math.max(1, k - look); i <= k; i++) {
-    cur = null;
-    state = "wait";
-    const c = bars[i].c;
-    const t0 = Math.floor(bars[i - 1].c / 1000) * 1000; // 앞 봉 종가가 있던 천 단위
-    const fresh = () => {
-      since = i;
-      reacted = new Set();
-    };
-    if (c < t0) {
-      T = Math.floor(c / 1000) * 1000 + 1000; // 천 단위를 아래로 뚫은 봉 → 그 천 단위부터 다시
-      dir = -1;
-      fresh();
-    } else if (c >= t0 + 1000) {
-      T = Math.floor(c / 1000) * 1000; // 천 단위를 위로 뚫은 봉
-      dir = 1;
-      fresh();
-    } else if (T != null && ((dir < 0 ? c >= T : c < T) || i - since > life)) {
-      T = null; // 뚫은 천 단위 반대편으로 돌아왔거나 오래됨 → 처음부터
-      dir = 0;
+export const LADDER_LIFE = 10;
+export function ladderAt(bars, k, life = LADDER_LIFE) {
+  const crossT = (i) => {
+    const b = bars[i];
+    const t = Math.ceil(b.l / 1000) * 1000;
+    return b.l < t && t <= b.h ? t : null;
+  };
+  const levelAt = (j) => {
+    for (let i = j; i > j - life && i >= 0; i--) {
+      const t = crossT(i);
+      if (t != null) return t;
     }
-    if (T == null) continue;
-    const low = bars[i].l;
-    const base = dir < 0 ? T - 1000 : T; // 칸을 세는 천 단위 바닥
-    if (low < base || low >= base + 1000) continue; // 천 단위 밖으로 꼬리만 나감
-    const band = Math.max(0, Math.min(8, Math.floor((low - base) / 200) * 2));
-    const adj = dir < 0 ? band === 8 : band === 0; // 뚫은 천 단위에 바로 붙은 칸
-    if (adj) continue;
-    cur = band;
-    if (bars[i].h >= base + (band + 2) * 100) {
-      // 칸의 위 끝(다음 둥근 숫자)까지 닿음
-      state = reacted.has(band) ? "obs" : "react";
-      reacted.add(band);
-    }
-  }
+    return null;
+  };
+  const touch = (i, t) => (bars[i].c >= t ? bars[i].h >= t + 200 : bars[i].l <= t - 200);
+  const T = levelAt(k);
   if (T == null) return { text: "1K 조건 대기", T: null, band: null };
-  if (state === "react") return { text: `${cur}-${cur + 2} 반응 발생`, T, band: cur };
-  if (state === "obs") return { text: `${cur}-${cur + 2} 구간 관찰`, T, band: cur };
-  return { text: "구간 반응 대기", T, band: null };
+  if (!touch(k, T)) return { text: "구간 반응 대기", T, band: null };
+  const band = bars[k].c >= T ? 2 : 6;
+  const before = k > 0 && levelAt(k - 1) === T && touch(k - 1, T);
+  return { text: `${band}-${band + 2} ${before ? "구간 관찰" : "반응 발생"}`, T, band };
 }
 
 /**
- * 3번 줄 프랙탈 (추정): k번 봉까지 확정된 마지막 프랙탈 고점·저점(양옆 n봉, 윌리엄스).
- * dir = 큰 방향(1 롱 · −1 숏 · 0 모름 — 1시간봉 구름 위치). 종가가 큰 방향과 반대쪽 프랙탈을 넘어서 있으면 "반대 이탈 · 재검토",
- * 같은 쪽을 넘어서 있으면 "같은 방향 돌파", 그 밖에는 "조건 대기"
+ * 3번 줄 프랙탈 흐름 (0.30.2): 끝난 봉 k까지 차례로 상태를 따라간다.
+ *   "조건 대기" → 뚜렷한 움직임 뒤 쉼이면 "상승 후 횡보"·"하락 후 횡보"
+ *     쉼 = 최근 rest(6)봉 종가의 폭 ≤ restAtr(0.6) × ATR, 움직임 = 그 6봉 바로 앞 move(10)봉 동안 종가가 moveAtr(2) × ATR 넘게 움직임
+ *   쉬는 동안 종가가 쉼 6봉의 고가~저가를 움직임 반대쪽으로 넘으면 "반대 이탈 · 재검토"를 hold(6)봉,
+ *   같은 쪽으로 넘으면 "상승 재개 후보"·"하락 재개 후보"를 6봉, 그 뒤 "조건 대기".
+ * 반대 이탈이 6봉 이어지는 것은 확인된 규칙, 쉼을 찾는 숫자와 재개 글자는 추정이에요.
+ * atr = C.atr(bars, 14) 배열
  */
-export function fractalState(bars, k, dir, n = 2) {
-  let hi = null;
-  let lo = null;
-  for (let i = k - n; i >= n && (hi == null || lo == null); i--) {
-    let isH = hi == null;
-    let isL = lo == null;
-    for (let j = i - n; j <= i + n; j++) {
-      if (j === i) continue;
-      if (bars[j].h >= bars[i].h) isH = false;
-      if (bars[j].l <= bars[i].l) isL = false;
+export const FRACTAL = { move: 10, moveAtr: 2, rest: 6, restAtr: 0.6, hold: 6 };
+export function fractalAt(bars, atr, k, look = 300, o = FRACTAL) {
+  let st = "wait"; // wait · rest · opp · resume
+  let dir = 0;
+  let n = 0;
+  let rh = 0;
+  let rl = 0;
+  for (let i = Math.max(o.move + o.rest, k - look); i <= k; i++) {
+    const c = bars[i].c;
+    if (st === "opp" || st === "resume") {
+      n++;
+      if (n >= o.hold) st = "wait";
+    } else if (st === "rest") {
+      if (dir < 0 ? c > rh : c < rl) {
+        st = "opp";
+        n = 0;
+      } else if (dir < 0 ? c < rl : c > rh) {
+        st = "resume";
+        n = 0;
+      }
     }
-    if (isH) hi = bars[i].h;
-    if (isL) lo = bars[i].l;
+    if (st !== "wait" || !(atr[i] > 0)) continue;
+    let hc = -Infinity;
+    let lc = Infinity;
+    for (let j = i - o.rest + 1; j <= i; j++) {
+      hc = Math.max(hc, bars[j].c);
+      lc = Math.min(lc, bars[j].c);
+    }
+    if (hc - lc > o.restAtr * atr[i]) continue;
+    const mv = bars[i - o.rest].c - bars[i - o.rest - o.move].c;
+    if (Math.abs(mv) < o.moveAtr * atr[i]) continue;
+    st = "rest";
+    dir = Math.sign(mv);
+    rh = -Infinity;
+    rl = Infinity;
+    for (let j = i - o.rest + 1; j <= i; j++) {
+      rh = Math.max(rh, bars[j].h);
+      rl = Math.min(rl, bars[j].l);
+    }
   }
-  const c = bars[k]?.c;
-  if (!dir || c == null) return { text: "조건 대기", hi, lo };
-  const up = hi != null && c > hi;
-  const dn = lo != null && c < lo;
-  if ((dir > 0 && dn) || (dir < 0 && up)) return { text: "반대 이탈 · 재검토", hi, lo };
-  if ((dir > 0 && up) || (dir < 0 && dn)) return { text: "같은 방향 돌파", hi, lo };
-  return { text: "조건 대기", hi, lo };
+  const word = dir > 0 ? "상승" : "하락";
+  if (st === "rest") return { text: `${word} 후 횡보`, state: st };
+  if (st === "opp") return { text: "반대 이탈 · 재검토", state: st };
+  if (st === "resume") return { text: `${word} 재개 후보`, state: st };
+  return { text: "조건 대기", state: st };
 }
 
-/** 7번 줄 관찰 기준 (추정): 지금·1시간·4시간 방향이 다 같으면 일치. 큰 시간봉을 못 보면 데이터 대기 */
-export function alignText(now, h1, h4) {
+/**
+ * 7번 줄 관찰 기준: 1시간봉·4시간봉 구름 위치가 같은 방향(둘 다 위 또는 둘 다 아래)이면 "큰 방향 숏 일치"처럼.
+ * 지금 차트 봉의 방향은 보지 않는다 (0.30.2: 지금 봉이 롱 우세여도 1H·4H가 숏이면 "큰 방향 숏 일치").
+ * 둘 중 하나라도 구름 안이거나 서로 다르면 미일치, 큰 시간봉을 못 보면 데이터 대기
+ */
+export function alignText(h1, h4) {
   if (h1 == null || h4 == null) return "큰 방향 데이터 대기";
-  if (now && now !== "inside" && now === h1 && now === h4) return `큰 방향 일치 · ${POS_KO[now]}`;
+  if (h1 !== "inside" && h1 === h4) return `큰 방향 ${POS_KO[h1]} 일치`;
   return "큰 방향 미일치";
 }
 
 /**
- * 8·9번 줄 매물영역 (우리 방식): 여러 봉이 좁게 옆으로 기다가 몸통 큰 봉이 뚫고 나간 구간(손바뀜 자리, findZones)의
- * 고가~저가 상자. 아래로 뚫고 나간 상자 = 위에서 막을 자리, 위로 뚫고 나간 상자 = 아래에서 받칠 자리.
- * 종가가 상자 반대편 끝을 넘으면 지운다. 끝난 봉(upto까지)만, 최근 look봉 안에서 뚫고 나간 것 중 살아 있는 것 (보여 줄 4개는 nearZones).
- * → [{s, e, i, lo, hi, kind:"res"|"sup"}]
+ * 8·9번 줄 매물영역 (0.30.2) — 가격이 모여 움직인 구간을 매물영역 봉(3분 차트는 15분봉)으로 잇달아 나눈다:
+ *   앞 seed(5)봉의 고가~저가로 상자를 잡고, 다음 봉의 고가·저가가 둘 다 그 안이면 상자를 늘린다.
+ *   한 봉이라도 밖으로 나가면 그 상자는 끝, 나간 봉 다음 봉부터 새 상자 (나간 봉은 어느 상자에도 안 들어감).
+ *   나간 봉이 끝난 상자만 낸다 (상자는 나중에야 알 수 있다). 앞 봉부터 차례로 세므로 n봉까지 자른 결과와 앞부분이 같다.
+ * → [{s, e, lo, hi}] (s~e = 상자 봉 번호)
  */
-export function boxZones(bars, upto = bars.length - 1, look = 300) {
-  const part = bars.slice(Math.max(0, upto + 1 - look - 60), upto + 1);
-  const off = Math.max(0, upto + 1 - look - 60);
-  if (part.length < 40) return [];
-  const atr = C.atr(part, 14);
+export const ZONE = { seed: 5, min: 6, look: 200, age: 72 };
+export function zoneBoxes(bars, o = ZONE) {
   const out = [];
-  for (const z of findZones(part, atr)) {
+  let s = 0;
+  while (s + o.seed < bars.length) {
     let lo = Infinity;
     let hi = -Infinity;
-    for (let k = z.s; k < z.i; k++) {
-      lo = Math.min(lo, part[k].l);
-      hi = Math.max(hi, part[k].h);
+    for (let j = s; j < s + o.seed; j++) {
+      lo = Math.min(lo, bars[j].l);
+      hi = Math.max(hi, bars[j].h);
     }
-    if (!(hi > lo)) continue;
-    let dead = false;
-    for (let k = z.i + 1; k < part.length; k++) {
-      if (z.kind === "res" ? part[k].c > hi : part[k].c < lo) {
-        dead = true;
-        break;
-      }
-    }
-    if (!dead) out.push({ s: z.s + off, e: z.i - 1 + off, i: z.i + off, lo, hi, kind: z.kind });
+    let e = s + o.seed - 1;
+    while (e + 1 < bars.length && bars[e + 1].l >= lo && bars[e + 1].h <= hi) e++;
+    if (e + 1 >= bars.length) break; // 아직 안 끝난 상자
+    out.push({ s, e, lo, hi });
+    s = e + 2;
   }
   return out;
 }
-/** 지금 가격에서 가까운 상자 n개 (가까운 순) */
-export function nearZones(zones, c, n = 4) {
-  const d = (z) => (c >= z.lo && c <= z.hi ? 0 : Math.min(Math.abs(c - z.lo), Math.abs(c - z.hi)));
-  return [...zones].sort((x, y) => d(x) - d(y)).slice(0, n);
+/**
+ * 끝난 매물영역 봉이 n개일 때 쓰는 상자 (boxes = zoneBoxes(bars)):
+ *   상자 봉이 min(6)개 이상 (앞 5봉 뒤로 한 봉 이상 안에 머묾) · 상자 첫 봉이 최근 look(200)봉 안 ·
+ *   상자가 끝난 뒤 종가가 위로도 아래로도 상자 밖에서 마감한 적이 있으면 지움.
+ *   count = 이렇게 남은 상자 수 (8번 줄), list = 그중 상자 마지막 봉 뒤로 age(72)봉(15분봉 18시간)이 지난 것 (9번 줄·차트 상자)
+ * → {count, list: [{s, e, lo, hi}]}
+ */
+export function liveZones(boxes, bars, n, o = ZONE) {
+  let count = 0;
+  const list = [];
+  for (const z of boxes) {
+    if (z.e + 1 >= n) break;
+    if (z.e - z.s + 1 < o.min || n - z.s > o.look) continue;
+    let up = false;
+    let dn = false;
+    for (let j = z.e + 1; j < n && !(up && dn); j++) {
+      if (bars[j].c > z.hi) up = true;
+      if (bars[j].c < z.lo) dn = true;
+    }
+    if (up && dn) continue;
+    count++;
+    if (n - 1 - z.e >= o.age) list.push(z);
+  }
+  return { count, list };
 }
 /** 가장 가까운 상자와 가격의 위치 → {z, where: "안"·"아래"·"위"} 또는 null */
 export function nearestZone(zones, c) {

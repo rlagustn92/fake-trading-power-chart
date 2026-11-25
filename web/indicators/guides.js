@@ -174,13 +174,13 @@ const BASE_KO = { "1h": "1시간", "4h": "4시간", "1D": "일봉" };
 const NYT_TIP = {
   now: "① 방향 — 지금 차트 봉이 구름 위면 롱 우세, 아래면 숏 우세, 안이면 중립\n구름 = 요즘 평균 가격대 띠 (일목균형표 9·26·52)\n끝난 봉으로 계산해요",
   htf: "① 방향 — 1시간봉·4시간봉의 구름 위치 (위 = 롱 · 안 = 중립 · 아래 = 숏)\n큰 물살이라 이게 더 중요해요\n차트가 1시간봉보다 크면 '범위 밖'",
-  frac: "④ 확인 (추정) — 최근 꼭짓점(프랙탈 고점·저점)을 종가가 넘었나\n'반대 이탈 · 재검토' = 1시간봉 방향과 반대로 깨졌어요 → 생각을 다시\n'같은 방향 돌파' = 1시간봉 방향으로 깨졌어요",
+  frac: "④ 확인 — 뚜렷하게 움직인 뒤 쉬는지, 다시 가는지\n'하락 후 횡보'·'상승 후 횡보' = 크게 움직이고 6봉째 좁게 쉬는 중\n'반대 이탈 · 재검토' = 쉬던 자리를 반대로 깼어요 → 생각을 다시 (6봉 동안)\n'재개 후보' = 쉬던 자리를 같은 쪽으로 깼어요\n쉼을 찾는 기준은 추정이에요",
   gap: "② 위치 — 가격이 구름에서 얼마나 멀리 나갔나 (평소 한 봉 크기 ATR의 몇 배)\n2배 넘으면 '이격 큼' = 고무줄이 너무 늘어난 상태\n따라 사거나 팔면 위험하고, 되돌아올 수 있어요",
-  ladder: "② 위치 (추정) — 비트코인 둥근 숫자 칸\n천 단위(60,000)를 뚫으면 그 옆 200달러 칸을 봐요\n아래로 뚫으면 8-1K · 6-8 · 4-6 …, 위로 뚫으면 0-2 · 2-4 · 4-6 …\n'반응 발생' = 그 칸에 처음 닿고 받쳐졌어요 · '구간 관찰' = 그 뒤 몇 봉\n'1K 조건 대기' = 천 단위를 아직 안 뚫었거나 뚫은 지 1시간이 지났어요\n3분봉 전용",
+  ladder: "② 위치 — 비트코인 둥근 숫자 칸\n봉이 천 단위(59,000 등)를 지나가면 10봉 동안 켜져요\n가격이 천 단위 위면 2-4 칸(59,200~59,400), 아래면 6-8 칸(58,600~58,800)을 봐요\n'반응 발생' = 그 칸에 새로 닿았어요 · '구간 관찰' = 계속 닿아 있어요\n'1K 조건 대기' = 최근 10봉 동안 천 단위를 안 지났어요\n3분봉 전용",
   act: "③ 힘 — 직전 봉 거래량이 앞 20봉 평균의 몇 배, ATR이 50봉 평균의 몇 배\n1.5배 넘으면 시장이 뜨거워요 (큰 손이 움직임)\n0.5배 아래면 조용해요 (움직임을 믿기 어려워요)",
-  align: "① 방향 (추정) — 지금·1시간·4시간이 다 같은 방향이면 '일치'\n엇갈리면 '미일치' = 조심, 크게 걸지 말기",
-  zone: "② 위치 (우리 방식) — 여러 봉이 좁게 기다가 큰 봉으로 뚫고 나간 자리(손바뀜) 중 가까운 4개\n영역 아래 = 가격이 그 아래 → 올라가다 막힐 수 있어요\n영역 위 = 내려가다 받쳐 줄 수 있어요",
-  near: "② 위치 — 가장 가까운 매물영역의 가격 범위\n차트의 상자 (분홍 = 막을 자리, 초록 = 받칠 자리)",
+  align: "① 방향 — 1시간봉·4시간봉 구름 위치가 같으면 '큰 방향 숏 일치'처럼 나와요\n지금 봉 방향은 안 봐요 (지금 봉이 롱 우세여도 큰 방향은 숏일 수 있어요)\n엇갈리면 '미일치' = 조심, 크게 걸지 말기",
+  zone: "② 위치 — 15분봉이 한동안 모여 움직였던 가격 상자 (최근 약 2일)\n앞 5봉 범위 안에 다음 봉들이 머문 구간이에요\n개수 = 아직 살아 있는 상자 · 18시간 안 된 상자는 숨겨요\n영역 아래 = 가격이 그 아래 → 올라가다 막힐 수 있어요\n영역 위 = 내려가다 받쳐 줄 수 있어요",
+  near: "② 위치 — 가장 가까운 매물영역의 가격 범위\n차트 상자는 만들어진 자리에만 그려요 (안 보이면 왼쪽으로)\n분홍 = 가격 위, 초록 = 가격 아래",
 };
 
 export function guideIndicators(T) {
@@ -395,7 +395,7 @@ export function guideIndicators(T) {
       params: [
         { key: "board", label: "오른쪽 위 표", def: true, type: "bool", tip: "9줄 표를 차트 오른쪽 위에 띄워요\n표 제목을 누르면 접혀요 (한 줄만)" },
         { key: "cloud", label: "구름 선", def: true, type: "bool", tip: "일목균형표 구름의 위·아래 끝 (흰 선 두 줄)\n트레이딩뷰 기본 9·26·52, 26칸 앞으로 민 값" },
-        { key: "zones", label: "매물영역 상자", def: true, type: "bool", tip: "가까운 매물영역 4개를 상자로 그려요\n분홍 = 위에서 막을 자리, 초록 = 아래에서 받칠 자리\n(우리 방식이에요)" },
+        { key: "zones", label: "매물영역 상자", def: true, type: "bool", tip: "18시간 넘게 지난 매물영역을 만들어진 자리에 상자로 그려요\n분홍 = 가격 위(막을 자리), 초록 = 가격 아래(받칠 자리)" },
       ],
       color: "#e8eaed",
       make(ctx, inst) {
@@ -448,21 +448,25 @@ export function guideIndicators(T) {
           }
           return lo;
         };
-        /** k번 봉이 끝날 때까지 끝난 매물영역 봉으로 찾은 상자 → {list: 가까운 4개, zb, from(상자마다 차트 봉 번호)} */
+        /** 매물영역 봉 전체로 한 번 나눈 상자 (앞에서부터 세므로 n봉까지 잘라 써도 같다) */
+        let zoneAll = { key: "", boxes: [] };
+        /** k번 봉이 끝날 때까지 끝난 매물영역 봉으로 본 상자 → {count, list(18시간 지난 상자), from·to(상자마다 차트 봉 번호)} */
         const zonesAt = (k) => {
           const zt = zoneTf();
           const same = zt === ctx.tf;
           const src = same ? last : ctx.htf(zt);
-          if (k < 0 || !src) return { list: [], zb: [] };
+          if (k < 0 || !src) return { count: 0, list: [], from: [], to: [] };
           const cut = last[k].t + span();
           let n = same ? k + 1 : src.length;
           if (!same) while (n > 0 && src[n - 1].t + TF_SEC[zt] > cut) n--;
           const key = `${zt}|${n}|${k}`;
           if (!zoneCache.has(key)) {
             if (zoneCache.size > 300) zoneCache.clear();
-            const zb = src.slice(0, n);
-            const list = CB.nearZones(CB.boxZones(zb), last[k].c, 4);
-            zoneCache.set(key, { list, zb, from: list.map((z) => (same ? z.s : firstAtOrAfter(zb[z.s].t))) });
+            const allKey = `${zt}|${src.length}|${src[src.length - 1]?.t}`;
+            if (zoneAll.key !== allKey) zoneAll = { key: allKey, boxes: CB.zoneBoxes(src) };
+            const { count, list } = CB.liveZones(zoneAll.boxes, src, n);
+            const endOf = (z) => (same ? z.e : firstAtOrAfter(src[z.e].t + TF_SEC[zt]) - 1);
+            zoneCache.set(key, { count, list, from: list.map((z) => (same ? z.s : firstAtOrAfter(src[z.s].t))), to: list.map(endOf) });
           }
           return zoneCache.get(key);
         };
@@ -479,12 +483,12 @@ export function guideIndicators(T) {
           const p1 = posOf(htfCloud("1h"));
           const p4 = posOf(htfCloud("4h"));
           const htfTxt = (name, x) => `${name} ${x === "out" ? "범위 밖" : x === "loading" ? "읽는 중" : CB.POS_KO[x] ?? "—"}`;
-          const fr = CB.fractalState(last, k, p1 === "above" ? 1 : p1 === "below" ? -1 : 0);
+          const fr = CB.fractalAt(last, atr, k);
           const gap = CB.cloudGap(b.c, cl.a[k], cl.b[k], atr[k]);
           // 3분봉 전용 (0.29.0에 3분봉이 생겨서 0.28.0의 1·5분봉 임시 허용을 뺐다)
           const lad = !CB.isBtcUsd(ctx.info?.id) ? "BTC USD계열 전용" : ctx.tf !== "3m" ? "3분봉 전용" : CB.ladderAt(last, k).text;
           const act = CB.activityAt(atr, rv, k);
-          const align = CB.alignText(now, P(p1), P(p4));
+          const align = CB.alignText(P(p1), P(p4));
           const zs = zonesAt(k);
           const nz = CB.nearestZone(zs.list, b.c);
           const zt = zoneTf();
@@ -493,10 +497,10 @@ export function guideIndicators(T) {
             { label: "큰 시간봉", value: `${htfTxt("1H", p1)} / ${htfTxt("4H", p4)}`, color: "#e8eaed", tip: NYT_TIP.htf },
             { label: "프랙탈", value: fr.text, color: /반대/.test(fr.text) ? "#ffb020" : "#c9ced6", tip: NYT_TIP.frac },
             { label: "구름 이격", value: CB.gapText(gap), color: gap != null && Math.abs(gap) >= CB.GAP_BIG ? "#ffb020" : "#c9ced6", tip: NYT_TIP.gap },
-            { label: "2·4·6·8", value: lad, color: /반응 발생/.test(lad) ? "#4cd5a0" : "#ffffff", bold: true, tip: NYT_TIP.ladder },
+            { label: "2·4·6·8", value: lad, color: /^2-4 반응/.test(lad) ? "#ff6fae" : /^6-8 반응/.test(lad) ? "#4cd5a0" : "#ffffff", bold: true, tip: NYT_TIP.ladder },
             { label: "시장 활동", value: `거래량 ${CB.xText(act.vol)} / ATR ${CB.xText(act.atr)}`, color: "#ffffff", bold: true, tip: NYT_TIP.act },
-            { label: "관찰 기준", value: align, color: /일치 ·/.test(align) ? posColor(now) : "#c9ced6", tip: NYT_TIP.align },
-            { label: "매물영역", value: nz ? `${zt} ${zs.list.length}개 · 영역 ${nz.where}` : `${zt} 없음`, color: "#f5c542", tip: NYT_TIP.zone },
+            { label: "관찰 기준", value: align, color: / 일치$/.test(align) ? posColor(P(p1)) : "#c9ced6", tip: NYT_TIP.align },
+            { label: "매물영역", value: nz ? `${zt} ${zs.count}개 · 영역 ${nz.where}` : zs.count ? `${zt} ${zs.count}개` : `${zt} 없음`, color: "#f5c542", tip: NYT_TIP.zone },
             { label: "가까운 영역", value: nz ? `${f(nz.z.lo)} ~ ${f(nz.z.hi)}` : "—", color: "#ffffff", bold: true, tip: NYT_TIP.near },
           ];
           const summary = CB.summaryOf({
@@ -513,8 +517,11 @@ export function guideIndicators(T) {
         };
         const drawBoxes = () => {
           if (!(p.zones ?? true)) return boxes.setData([]);
-          const zs = zonesAt(closedIdx(last.length - 1));
-          boxes.setData(zs.list.map((z, n) => ({ from: zs.from[n], to: null, lo: z.lo, hi: z.hi, color: z.kind === "res" ? "#ff6fae" : "#4cd5a0", label: "매물영역" })));
+          const k = closedIdx(last.length - 1);
+          const zs = zonesAt(k);
+          const c = last[k]?.c;
+          // 상자는 만들어진 자리에만 (지금 봉까지 늘이지 않음) · 가격 위 = 분홍(막을 자리), 아래 = 초록(받칠 자리)
+          boxes.setData(zs.list.map((z, n) => ({ from: zs.from[n], to: zs.to[n], lo: z.lo, hi: z.hi, color: c != null && z.lo > c ? "#ff6fae" : "#4cd5a0", label: "매물영역" })));
         };
         return {
           series: [sA, sB].filter(Boolean),
