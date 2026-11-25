@@ -524,11 +524,30 @@ export function createCell(env, cc) {
       htfCache.set(key, { bars: s.bars, from: after, to: Math.max(last, lastHtf), live: all || (!replay && !windowed) });
       renderIndicators(0);
       paintLegend(); // 범례가 "—"로 남지 않게 (QA N10)
+      if (info.kind === "perp" || (info.intraday === "yahoo" && !isDailyTf(t))) fetchHtf(t, key, my);
     } catch (e) {
       console.warn("[cell] 기준 봉 읽기 실패", e);
     } finally {
       htfLoading.delete(key);
     }
+  }
+
+  /**
+   * 상위 봉을 저장소에 받아 두기 (0.30.1). 무기한선물은 봉마다 따로 받아 저장해서, 15분·1시간·4시간 차트를 연 적이 없으면
+   * 저장소가 비어 나뇨띠 지표가 "15m 없음"·"1H 읽는 중"에서 멈췄다 (2026-11-25 삼성·하이닉스 3분봉). 국내 종목 1시간봉도 같다.
+   * 새로 받은 게 있으면 기억을 지우고 다시 그린다 → ctx.htf가 저장소를 다시 읽는다. 받기는 data가 55초에 한 번만 해서 되풀이되지 않는다.
+   * 알파카는 처음 받을 때 몇 년치라 지표가 몰래 받게 하지 않는다 (그 봉 차트를 열면 받는다)
+   */
+  function fetchHtf(t, key, my) {
+    data
+      .ensure(info, t)
+      .then((n) => {
+        if (!n || my !== token) return;
+        htfCache.delete(key);
+        renderIndicators(0);
+        paintLegend();
+      })
+      .catch(() => {});
   }
 
   /** 상위 봉 맨 끝(지금 만들어지는 봉)부터는 이 칸 봉을 직접 묶어서 바꾼다 → 실시간으로 움직인다 */
