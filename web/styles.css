@@ -171,7 +171,7 @@ button.icon.on { background: var(--primary); border-color: var(--primary); }
 .lg-badge.rest { color: #dfe3e8; }
 .lg-why { color: #e8eaed; font-size: 14px; background: rgba(16, 18, 22, 0.78); padding: 2px 6px; border-radius: 4px; margin-left: 4px; }
 .lg-val { color: #c9ced6; }
-/* 오른쪽 위 지표 표 (0.28.0 나뇨띠 지표): 방송 화면의 표처럼 */
+/* 오른쪽 위 지표 표 (0.28.0 나뇨띠 지표) */
 .ind-panel { position: absolute; top: 6px; right: 70px; z-index: 4; min-width: 270px; max-width: min(360px, 60%); background: rgba(16, 19, 24, 0.9); border: 1px solid #343b45; border-radius: 8px; padding: 4px 0 4px; font-size: 14px; line-height: 1.55; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4); }
 .ind-panel[hidden] { display: none; }
 .ip-head { padding: 2px 10px 3px; cursor: pointer; color: #f5c542; font-size: 14px; white-space: nowrap; }

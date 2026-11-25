@@ -96,13 +96,14 @@ Tauri 2 Windows app for paper trading on replayed charts. It is a clone of `POWE
   - `ladderAt` also handles upward thousand breaks. The band comes from the bar low.
     - A bar whose high reaches the band's top (the next round hundred) is a test: the first per band shows "반응 발생", later ones "구간 관찰".
     - Bars that do not reach it show "구간 반응 대기".
-    - 0.29.1 replaced the 0.29.0 "3-bar 관찰" rule after a 23:31 capture. It matches all 14 screenshots.
+    - 0.29.1 replaced the 0.29.0 "3-bar 관찰" rule.
 - 0.28.0 (0.27.0 folded in, released together):
-  - 나뇨띠 지표 (`nanyotti` in guides.js, pure math in `indicators/cloudboard.js`): our reconstruction of streamer 나뇨띠's TradingView table, built from his live-stream screenshots and Binance bars.
-    - The user asked for the streamer's name as the indicator name. This is an exception to the "method name, instructor only in the description" rule.
-    - Rows 1–7 reproduced 11 screenshots exactly: Ichimoku 9/26/52 displaced 26, last closed bar, ATR 14, `C.rvol` 20, ATR/SMA(ATR,50), 1H/4H via `mapHtf`.
-    - Row 5 (2·4·6·8) is a round-number state machine (`ladderAt`). Rows 3 and 7 are fitted guesses.
-    - Zones (rows 8–9) use our own rule: `boxZones` over `findZones` bases, because his rule was not found.
+  - 나뇨띠 지표 (`nanyotti` in guides.js, pure math in `indicators/cloudboard.js`): a 9-row Ichimoku status table (our estimate).
+    - **Its background lives only on the user's PCs in `private/` (gitignored). Read `private/README.md` before working on it.** Never write that background into public files (docs, code comments, test names, in-app text, Release notes). The user decided this on 2026-11-25.
+    - The indicator name is the user's choice. This is an exception to the "method name, instructor only in the description" rule.
+    - Rows: Ichimoku 9/26/52 displaced 26, last closed bar, ATR 14, `C.rvol` 20, ATR/SMA(ATR,50), 1H/4H via `mapHtf`.
+    - Row 5 (2·4·6·8) is a round-number state machine (`ladderAt`). Rows 3 and 7 are guesses.
+    - Zones (rows 8–9) use our own rule: `boxZones` over `findZones` bases.
     - The app has no 3m timeframe, so the ladder runs on 1m/5m with a 1-hour life.
   - The table is drawn by a new cell hook: a handle may return `panel(i)` → {title, sub, rows:[{label,value,color,bold,tip}], summary, foot}. `cell.js` `paintPanel` shows the first one at the top-right; clicking the title folds it (`cc.panel_fold`). Boxes come from `primitives.js` `Boxes`.
   - Fib drawing: `dw.log` is set at draw time from the chart's log scale. `dw.ext` (1.272/2 beyond the later point) follows `cfg.chart.fib_ext` and starts on. Labels read "0.5 (103.97)" (`fibPrice`, `fibLabel`).

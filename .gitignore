@@ -16,3 +16,5 @@ __pycache__/
 모의매매_화면.jpg
 모의매매_차트.png
 prototype/screenshot.jpg
+# 공개하지 않는 지표 배경 노트는 PC에만 (사용자 결정 2026-11-25). 클로드는 private/README.md부터 읽는다
+private/
